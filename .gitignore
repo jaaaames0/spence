@@ -1,0 +1,27 @@
+# .gitignore for SPENCE
+
+# Database files - Never commit personal data
+database/spence.db
+database/spence.db-shm
+database/spence.db-wal
+database/*.backup
+database/*.db
+
+# Keep the schema and empty database
+!database/schema.sql
+!database/spence_empty.db
+
+# API Keys and local config
+core/credentials.env
+core/keys.json
+.env
+
+# Uploaded images and ingest cache
+ingest/
+uploads/
+cache/
+
+# System / IDE
+.DS_Store
+.vscode/
+node_modules/
