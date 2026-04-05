@@ -2,6 +2,7 @@
 /**
  * SPENCE User API v1.0 (Phase 10.0: Identity & Goals)
  */
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
 header('Content-Type: application/json');
 $db = get_db_connection();

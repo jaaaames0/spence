@@ -5,13 +5,51 @@
 
 // Global Timezone Protocol (GTP v1.0)
 date_default_timezone_set('Australia/Sydney');
-define('SPENCE_TIMEZONE_OFFSET', '+11 hours'); // Local offset from UTC
+define('SPENCE_TIMEZONE_OFFSET', sprintf('%+d hours', (int)(date('Z') / 3600))); // Derived from system tz, handles AEDT/AEST DST
 
 function get_db_connection() {
     $dbPath = __DIR__ . '/../database/spence.db';
     $db = new PDO('sqlite:' . $dbPath);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->exec('PRAGMA busy_timeout = 5000;');
+    $db->exec('PRAGMA journal_mode=WAL;');
+    $db->exec('PRAGMA foreign_keys = ON;');
+    // Auto-migrations for consumption_log
+    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN source TEXT DEFAULT 'inventory'"); } catch (Exception $e) {}
+    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN name TEXT"); } catch (Exception $e) {}
+    $db->exec('CREATE TABLE IF NOT EXISTS dedupe_dismissed (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id_a INTEGER NOT NULL,
+        product_id_b INTEGER NOT NULL,
+        dismissed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(product_id_a, product_id_b)
+    )');
+    // Spice Rack tables
+    $db->exec('CREATE TABLE IF NOT EXISTS spice_rack (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        is_stocked INTEGER NOT NULL DEFAULT 1,
+        uses_since_restock INTEGER NOT NULL DEFAULT 0,
+        restock_flagged INTEGER NOT NULL DEFAULT 0,
+        last_restocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )');
+    $db->exec('CREATE TABLE IF NOT EXISTS recipe_spices (
+        recipe_id INTEGER NOT NULL,
+        spice_id INTEGER NOT NULL,
+        PRIMARY KEY (recipe_id, spice_id),
+        FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+        FOREIGN KEY (spice_id) REFERENCES spice_rack(id) ON DELETE CASCADE
+    )');
+    // Seed canonical spice list (INSERT OR IGNORE — safe to run every boot)
+    $canonical_spices = [
+        'Salt', 'Black Pepper', 'Garlic Powder', 'Onion Powder', 'Paprika',
+        'Smoked Paprika', 'Cumin', 'Coriander', 'Turmeric', 'Chili Flakes',
+        'Cayenne Pepper', 'Oregano', 'Thyme', 'Rosemary', 'Basil',
+        'Cinnamon', 'Ginger', 'Bay Leaves',
+    ];
+    $ins = $db->prepare("INSERT OR IGNORE INTO spice_rack (name) VALUES (?)");
+    foreach ($canonical_spices as $spice) { $ins->execute([$spice]); }
     return $db;
 }
 
@@ -96,4 +134,67 @@ function syncRecipeToProduct($db, $recipe_id) {
        ->execute([$kj_per_100, $protein_per_100, $fat_per_100, $carbs_per_100, $weight_per_ea, $cost_per_portion, $product_id]);
 
     return $product_id;
+}
+
+/**
+ * Canonical category order — single source of truth for category sorting.
+ */
+define('SPENCE_CATEGORIES', [
+    'Meal Prep', 'Proteins', 'Dairy', 'Bread',
+    'Fruit and Veg', 'Cereals/Grains', 'Snacks/Confectionary', 'Drinks', 'Other'
+]);
+
+/**
+ * Returns a SQL CASE expression for ordering by category priority.
+ * @param string $column  The SQL column reference, e.g. 'p.category'
+ */
+function getCategoryOrderSQL(string $column = 'p.category'): string {
+    $cases = [];
+    foreach (SPENCE_CATEGORIES as $i => $cat) {
+        $escaped = str_replace("'", "''", $cat);
+        $cases[] = "WHEN '{$escaped}' THEN " . ($i + 1);
+    }
+    return "CASE {$column} " . implode(' ', $cases) . ' ELSE ' . (count(SPENCE_CATEGORIES) + 1) . ' END';
+}
+
+/**
+ * Fetch current user goals with sensible defaults if no profile exists.
+ * Returns: ['user_id', 'kj', 'p', 'f', 'c', 'cost']
+ */
+function getUserGoals(PDO $db): array {
+    $defaults = ['user_id' => null, 'kj' => 8700, 'p' => 150, 'f' => 70, 'c' => 250, 'cost' => 15.00];
+
+    $user_id = $db->query("SELECT id FROM user_profiles LIMIT 1")->fetchColumn();
+    if (!$user_id) return $defaults;
+
+    $stmt = $db->prepare("SELECT * FROM user_goals_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
+    $stmt->execute([$user_id]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) return array_merge($defaults, ['user_id' => $user_id]);
+
+    return [
+        'user_id' => $user_id,
+        'kj'      => (float)$g['target_kj'],
+        'p'       => (float)$g['target_protein_g'],
+        'f'       => (float)$g['target_fat_g'],
+        'c'       => (float)$g['target_carb_g'],
+        'cost'    => (float)$g['cost_limit_daily'],
+    ];
+}
+
+/**
+ * Calculate macros for a consumed quantity of a product.
+ * @param array  $product  Product row with kj_per_100, protein_per_100, fat_per_100, carb_per_100, weight_per_ea
+ * @param float  $qty      Quantity consumed
+ * @param string $unit     'ea' or weight/volume unit
+ */
+function calculateMacros(array $product, float $qty, string $unit): array {
+    $weight = ($unit === 'ea') ? ($qty * (float)$product['weight_per_ea']) : $qty;
+    $factor = $weight / 0.1;
+    return [
+        'kj'      => (int)round($factor * $product['kj_per_100']),
+        'protein' => round($factor * $product['protein_per_100'], 1),
+        'fat'     => round($factor * $product['fat_per_100'], 1),
+        'carb'    => round($factor * $product['carb_per_100'], 1),
+    ];
 }

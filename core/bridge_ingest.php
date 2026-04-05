@@ -54,21 +54,42 @@ foreach ($items as $item) {
         }
 
         // 2. Add to Inventory
+        // Fetch the product's canonical unit — it may have been changed since last ingest.
+        // Normalize the AI's quantity into the canonical unit before writing to inventory.
+        $stmt = $db->prepare("SELECT base_unit, weight_per_ea FROM products WHERE id = ?");
+        $stmt->execute([$productId]);
+        $prod_meta = $stmt->fetch(PDO::FETCH_ASSOC);
+        $canonical_unit = $prod_meta ? $prod_meta['base_unit'] : $item['unit'];
+        $prod_wpe = (float)($prod_meta['weight_per_ea'] ?? 0);
+
+        $incoming_amount = $item['amount'];
+        if ($item['unit'] !== $canonical_unit) {
+            if ($item['unit'] !== 'ea' && $canonical_unit === 'ea' && $prod_wpe > 0) {
+                // weight/volume → ea: e.g. AI sends 0.16 kg, product is ea with weight_per_ea=0.16 → 1 ea
+                $incoming_amount = $item['amount'] / $prod_wpe;
+            } elseif ($item['unit'] === 'ea' && $canonical_unit !== 'ea' && $prod_wpe > 0) {
+                // ea → weight/volume: e.g. AI sends 1 ea, product is kg with weight_per_ea=0.16 → 0.16 kg
+                $incoming_amount = $item['amount'] * $prod_wpe;
+            }
+            // else: incompatible units with no weight_per_ea set — use as-is (safe fallback)
+        }
+
         $stmt = $db->prepare("SELECT id, current_qty, price_paid FROM inventory WHERE product_id = ? AND location = ? LIMIT 1");
         $stmt->execute([$productId, $item['location']]);
         $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($existing) {
-            $newQty = $existing['current_qty'] + $item['amount'];
+            $newQty = $existing['current_qty'] + $incoming_amount;
             $newPrice = $existing['price_paid'] + $item['price'];
-            $stmt = $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-            $stmt->execute([$newQty, $newPrice, $existing['id']]);
+            // Also correct a stale unit on the existing row if it no longer matches canonical
+            $stmt = $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, unit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            $stmt->execute([$newQty, $newPrice, $canonical_unit, $existing['id']]);
         } else {
             $stmt = $db->prepare("INSERT INTO inventory (product_id, current_qty, unit, price_paid, location) VALUES (?, ?, ?, ?, ?)");
             $stmt->execute([
                 $productId,
-                $item['amount'],
-                $item['unit'],
+                $incoming_amount,
+                $canonical_unit,
                 $item['price'],
                 $item['location']
             ]);

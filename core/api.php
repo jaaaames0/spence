@@ -2,7 +2,9 @@
 /**
  * SPENCE AJAX API v4.2 (High-Fidelity & Hardened)
  */
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
+require_once __DIR__ . '/matching.php';
 header('Content-Type: application/json');
 $db = get_db_connection();
 
@@ -213,6 +215,117 @@ try {
         
         $db->commit();
         echo json_encode(['status' => 'success', 'id' => $target_recipe_id]);
+
+    } elseif ($action === 'update_product') {
+        $db->beginTransaction();
+
+        // Fetch current unit before we overwrite it, so we can cascade a unit change to inventory
+        $stmt = $db->prepare("SELECT base_unit, weight_per_ea FROM products WHERE id = ?");
+        $stmt->execute([$id]);
+        $old_prod = $stmt->fetch(PDO::FETCH_ASSOC);
+        $old_unit = $old_prod['base_unit'] ?? '';
+        $old_wpe  = (float)($old_prod['weight_per_ea'] ?? 0);
+        $new_unit = $_POST['unit'];
+        $new_wpe  = (float)$_POST['weight'];
+
+        $stmt = $db->prepare("UPDATE products SET name = ?, category = ?, base_unit = ?, kj_per_100 = ?, protein_per_100 = ?, fat_per_100 = ?, carb_per_100 = ?, weight_per_ea = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+        $stmt->execute([$_POST['name'], $_POST['category'], $new_unit, (float)$_POST['kj'], (float)$_POST['protein'], (float)$_POST['fat'], (float)$_POST['carb'], $new_wpe, $id]);
+
+        // Cascade unit change to all inventory rows so qty stays numerically consistent
+        // and macros are calculated correctly on next consumption.
+        if ($old_unit && $old_unit !== $new_unit) {
+            $stmt = $db->prepare("SELECT id, current_qty FROM inventory WHERE product_id = ?");
+            $stmt->execute([$id]);
+            $inv_rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($inv_rows as $row) {
+                $old_qty = (float)$row['current_qty'];
+                $new_qty = $old_qty;
+                if ($old_unit !== 'ea' && $new_unit === 'ea' && $new_wpe > 0) {
+                    // weight/volume → ea: 0.16 kg ÷ 0.16 kg/ea = 1 ea
+                    $new_qty = $old_qty / $new_wpe;
+                } elseif ($old_unit === 'ea' && $new_unit !== 'ea' && $old_wpe > 0) {
+                    // ea → weight/volume: 1 ea × 0.16 kg/ea = 0.16 kg
+                    $new_qty = $old_qty * $old_wpe;
+                }
+                // price_paid stays unchanged — it's what you paid, not unit-dependent
+                $db->prepare("UPDATE inventory SET current_qty = ?, unit = ? WHERE id = ?")
+                   ->execute([$new_qty, $new_unit, $row['id']]);
+            }
+        }
+
+        $db->commit();
+        echo json_encode(['status' => 'success']);
+
+    } elseif ($action === 'create_product') {
+        $stmt = $db->prepare("INSERT INTO products (name, category, base_unit, kj_per_100, protein_per_100, fat_per_100, carb_per_100, weight_per_ea, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'raw')");
+        $stmt->execute([$_POST['name'], $_POST['category'], $_POST['unit'], (float)$_POST['kj'], (float)$_POST['protein'], (float)$_POST['fat'], (float)$_POST['carb'], (float)$_POST['weight']]);
+        echo json_encode(['status' => 'success']);
+
+    } elseif ($action === 'merge') {
+        $blend = isset($_POST['blend_macros']) && $_POST['blend_macros'] === '1';
+        $result = executeProductMerge($db, (int)($_POST['source_id'] ?? 0), (int)($_POST['target_id'] ?? 0), $blend);
+        echo json_encode($result);
+
+    } elseif ($action === 'dismiss_dedupe_pair') {
+        $id_a = (int)($_POST['id_a'] ?? 0);
+        $id_b = (int)($_POST['id_b'] ?? 0);
+        if (!$id_a || !$id_b) throw new Exception("Invalid product IDs.");
+        $db->prepare("INSERT OR IGNORE INTO dedupe_dismissed (product_id_a, product_id_b) VALUES (?, ?)")
+           ->execute([min($id_a, $id_b), max($id_a, $id_b)]);
+        echo json_encode(['status' => 'success']);
+
+    // ── Spice Rack ───────────────────────────────────────────────────────────
+
+    } elseif ($action === 'get_spices') {
+        $stmt = $db->query("SELECT * FROM spice_rack ORDER BY
+            CASE name
+                WHEN 'Salt'          THEN 1
+                WHEN 'Black Pepper'  THEN 2
+                WHEN 'Paprika'       THEN 3
+                WHEN 'Garlic Powder' THEN 4
+                WHEN 'Onion Powder'  THEN 5
+                ELSE 6
+            END, name ASC");
+        echo json_encode(['status' => 'success', 'spices' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+
+    } elseif ($action === 'add_spice') {
+        $name = trim($_POST['name'] ?? '');
+        if (!$name) throw new Exception("Spice name required.");
+        $db->prepare("INSERT OR IGNORE INTO spice_rack (name) VALUES (?)")->execute([$name]);
+        $spice_id = $db->lastInsertId() ?: $db->query("SELECT id FROM spice_rack WHERE name = " . $db->quote($name))->fetchColumn();
+        $spice = $db->query("SELECT * FROM spice_rack WHERE id = $spice_id")->fetch(PDO::FETCH_ASSOC);
+        echo json_encode(['status' => 'success', 'spice' => $spice]);
+
+    } elseif ($action === 'toggle_spice') {
+        $spice_id = (int)($_POST['spice_id'] ?? 0);
+        $is_stocked = (int)($_POST['is_stocked'] ?? 0);
+        if ($is_stocked) {
+            // Restocking: reset counter and flag
+            $db->prepare("UPDATE spice_rack SET is_stocked = 1, uses_since_restock = 0, restock_flagged = 0, last_restocked_at = CURRENT_TIMESTAMP WHERE id = ?")
+               ->execute([$spice_id]);
+        } else {
+            $db->prepare("UPDATE spice_rack SET is_stocked = 0 WHERE id = ?")->execute([$spice_id]);
+        }
+        echo json_encode(['status' => 'success']);
+
+    } elseif ($action === 'delete_spice') {
+        $db->prepare("DELETE FROM spice_rack WHERE id = ?")->execute([$id]);
+        echo json_encode(['status' => 'success']);
+
+    } elseif ($action === 'get_recipe_spices') {
+        $recipe_id = (int)($_POST['recipe_id'] ?? 0);
+        $stmt = $db->prepare("SELECT spice_id FROM recipe_spices WHERE recipe_id = ?");
+        $stmt->execute([$recipe_id]);
+        echo json_encode(['status' => 'success', 'spice_ids' => $stmt->fetchAll(PDO::FETCH_COLUMN)]);
+
+    } elseif ($action === 'save_recipe_spices') {
+        $recipe_id = (int)($_POST['recipe_id'] ?? 0);
+        $spice_ids = json_decode($_POST['spice_ids'] ?? '[]', true);
+        if (!$recipe_id) throw new Exception("Recipe ID required.");
+        $db->prepare("DELETE FROM recipe_spices WHERE recipe_id = ?")->execute([$recipe_id]);
+        $ins = $db->prepare("INSERT OR IGNORE INTO recipe_spices (recipe_id, spice_id) VALUES (?, ?)");
+        foreach ($spice_ids as $sid) { $ins->execute([$recipe_id, (int)$sid]); }
+        echo json_encode(['status' => 'success']);
     }
 } catch (Exception $e) {
     if ($db->inTransaction()) $db->rollBack();

@@ -1,0 +1,116 @@
+/* === SPENCE Global Stylesheet === */
+
+/* Base */
+body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
+
+/* Utilities */
+.fw-black { font-weight: 900; letter-spacing: -1px; }
+.uppercase { text-transform: uppercase; }
+.text-muted { color: #888 !important; }
+.text-accent { color: #00A3FF !important; }
+.x-small { font-size: 0.7rem; }
+
+/* Macro colour tokens */
+.color-kj   { color: #ff9800 !important; }
+.color-p    { color: #2196f3 !important; }
+.color-f    { color: #f44336 !important; }
+.color-c    { color: #A349A4 !important; }
+.color-cost { color: #4caf50 !important; }
+
+/* Macro badges */
+.badge-kj         { background-color: #ff9800; color: #000; font-weight: bold; }
+.badge-protein,
+.badge-p          { background-color: #2196f3; color: #fff; font-weight: bold; }
+.badge-fat        { background-color: #f44336; color: #fff; font-weight: bold; }
+.badge-carb       { background-color: #9c27b0; color: #fff; font-weight: bold; }
+.badge-cost       { background-color: #4caf50; color: #000; font-weight: bold; }
+.badge-efficiency { background-color: #4caf50; color: #000; font-weight: bold; }
+.badge-tag        { background: #444; color: #ccc; font-weight: 600; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; border: 1px solid #555; }
+
+/* Cards */
+.card { background-color: #1e1e1e; border: 1px solid #333; color: #e0e0e0; }
+
+/* Tables */
+.table { color: #e0e0e0; vertical-align: middle; border-color: #333; }
+.table-dark { --bs-table-bg: #1e1e1e; --bs-table-border-color: #333; }
+
+/* Forms */
+.form-control                { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
+.form-control::placeholder   { color: #888 !important; opacity: 1; }
+.form-control:focus          { border-color: #555 !important; box-shadow: none !important; }
+.form-select                 { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
+.input-group .form-control   { background-color: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
+.input-group .input-group-text { background-color: #1a1a1a !important; border: 1px solid #333 !important; color: #888 !important; }
+
+/* Modals */
+.modal-content { background: #1e1e1e; border: 1px solid #444; color: #e0e0e0; }
+
+/* Global navbar (from header.php) */
+.nav-link { color: #888 !important; transition: all 0.2s; border-bottom: 2px solid transparent; }
+.nav-link:hover { color: #fff !important; }
+.nav-link.active { color: #00A3FF !important; border-bottom-color: #00A3FF; }
+[data-context="raid"]    .nav-link.active,
+[data-context="raid"]    .navbar-brand span:first-child { color: #ff9800 !important; border-bottom-color: #ff9800; }
+[data-context="cook"]    .nav-link.active,
+[data-context="cook"]    .navbar-brand span:first-child { color: #f44336 !important; border-bottom-color: #f44336; }
+[data-context="recipedb"] .nav-link.active,
+[data-context="recipedb"] .navbar-brand span:first-child { color: #A349A4 !important; border-bottom-color: #A349A4; }
+[data-context="log"]     .nav-link.active,
+[data-context="log"]     .navbar-brand span:first-child { color: #4caf50 !important; border-bottom-color: #4caf50; }
+[data-context="settings"] .nav-link.active,
+[data-context="settings"] .navbar-brand span:first-child { color: #6c757d !important; border-bottom-color: #6c757d; }
+
+/* Bootstrap nav-tabs (sub-navigation within pages) */
+.nav-tabs { border-bottom: 2px solid #333; }
+.nav-tabs .nav-link { color: #888; border: none; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; }
+[data-context="log"]      .nav-tabs .nav-link.active { background: none; color: #4caf50 !important; border-bottom: 3px solid #4caf50; }
+[data-context="settings"] .nav-tabs .nav-link.active { background: none; color: #6c757d !important; border-bottom: 3px solid #6c757d; }
+
+/* Icon buttons */
+.btn-icon { background: none; border: none; color: #888; padding: 0 5px; cursor: pointer; transition: color 0.2s; }
+.btn-icon:hover .bi-pencil,
+.btn-icon:hover .bi-check-lg { color: #ffc107; }
+.btn-icon:hover .bi-trash,
+.btn-icon:hover .bi-x-lg { color: #ff4444; }
+
+/* Date picker controls (log pages) */
+.date-control { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 5px 15px; display: inline-flex; align-items: center; gap: 10px; }
+.datepicker-input { background: transparent; border: none; color: #e0e0e0; font-weight: 700; width: 130px; cursor: pointer; }
+.datepicker-input::-webkit-calendar-picker-indicator { filter: invert(1); }
+
+/* Stat labels (log/progress, settings) */
+.stat-label { font-size: 0.7rem; font-weight: 900; color: #666; letter-spacing: 1px; margin-bottom: 2px; }
+.stat-value { font-size: 1.5rem; font-weight: 900; color: #fff; line-height: 1; }
+
+/* Chart containers (log pages) */
+.chart-container { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem; }
+
+/* Column visibility (stock page settings) */
+.col-hidden { display: none !important; }
+
+/* Cook context: tag badges use cook-red accent */
+[data-context="cook"] .badge-tag { background: #f44336; color: #fff; border-color: #f44336; }
+
+/* Spin animation (header) */
+.spin { animation: rotation 2s infinite linear; display: inline-block; }
+@keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(359deg); } }
+
+/* ==================== MOBILE PASS v1.6 ==================== */
+
+/* Mobile nav label (header.php) */
+.mobile-nav-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Section headers: full-width search on mobile, proper row spacing */
+@media (max-width: 767px) {
+    .section-header .input-group { max-width: 100% !important; }
+    .section-header > [class*="col-"] { margin-bottom: 0.6rem; }
+    .section-header > [class*="col-"]:last-child { margin-bottom: 0; padding-top: 0.15rem; }
+}
+
+/* Stock/Log expandable mobile detail rows — always hidden on desktop */
+@media (min-width: 768px) {
+    .mob-detail-row { display: none !important; }
+}
+
+/* Log table: mobile macro badges inside item cell */
+.mob-macro-line { font-size: 0.65rem; line-height: 1.6; }

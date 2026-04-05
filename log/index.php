@@ -2,6 +2,7 @@
 /**
  * SPENCE | Daily Intake & Fuel Log (Phase 7.4: Granular Composition)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -40,25 +41,9 @@ $stmt = $db->prepare("
 $stmt->execute([$current_date, $current_date]);
 $averages = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// 4. Goal Fetching (Phase 10.0: Identity Integration)
-$stmt = $db->query("SELECT id FROM user_profiles LIMIT 1");
-$user_id = $stmt->fetchColumn();
-
-// Default Fallbacks
-$goal_kj = 8700; $goal_p = 150; $goal_f = 70; $goal_c = 250; $goal_cost = 15.00;
-
-if ($user_id) {
-    $stmt = $db->prepare("SELECT * FROM user_goals_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
-    $stmt->execute([$user_id]);
-    $g = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($g) {
-        $goal_kj = $g['target_kj'];
-        $goal_p = $g['target_protein_g'];
-        $goal_f = $g['target_fat_g'];
-        $goal_c = $g['target_carb_g'];
-        $goal_cost = $g['cost_limit_daily'];
-    }
-}
+// 4. Goal Fetching
+$goals = getUserGoals($db);
+$goal_kj = $goals['kj']; $goal_p = $goals['p']; $goal_f = $goals['f']; $goal_c = $goals['c']; $goal_cost = $goals['cost'];
 
 function getAlertClass($current, $goal) {
     if (!$goal || $goal == 0) return 'd-none';
@@ -69,12 +54,17 @@ function getAlertClass($current, $goal) {
 }
 
 // Detailed Log (Chronological Order + Local Time for Display)
+// Ghost recipes (forks) resolve to parent product name
 $stmt = $db->prepare("
-    SELECT cl.*, p.name as product_name, p.last_unit_cost, p.recipe_id, r.yield_serves, r.is_active as recipe_active,
+    SELECT cl.*,
+           COALESCE(p_parent.name, p.name, cl.name, '—') as product_name,
+           p.last_unit_cost, p.recipe_id, r.yield_serves, r.is_active as recipe_active,
            DATETIME(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') as local_consumed_at
     FROM consumption_log cl
-    JOIN products p ON cl.product_id = p.id
+    LEFT JOIN products p ON cl.product_id = p.id
     LEFT JOIN recipes r ON p.recipe_id = r.id
+    LEFT JOIN recipes r_parent ON r.parent_recipe_id = r_parent.id
+    LEFT JOIN products p_parent ON r_parent.product_id = p_parent.id
     WHERE DATE(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') = ?
     ORDER BY cl.consumed_at ASC");
 $stmt->execute([$current_date]);
@@ -113,53 +103,30 @@ foreach ($log_entries as $entry) {
         $recipe_breakdowns[$entry['id']] = $breakdown;
     }
 }
+$page_title   = 'Daily Log';
+$page_context = 'log';
+$extra_head   = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>';
+$extra_styles = '<style>
+    .stat-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem 1rem; height: 100%; display: flex; flex-direction: column; justify-content: center; }
+    .stat-sub { font-size: 0.8rem; font-weight: 700; color: #555; margin-top: 5px; }
+    .stat-value { font-size: 2.2rem; font-weight: 900; line-height: 1.1; margin-top: 5px; }
+    .table-dark { --bs-table-bg: #1a1a1a; --bs-table-border-color: #333; color: #e0e0e0; border-collapse: separate; border-spacing: 0; }
+    .entry-row { cursor: pointer; transition: 0.1s; border-left: 4px solid transparent; }
+    .entry-row:hover { background: #222 !important; }
+    .entry-row.expanded { border-left-color: #4caf50; background: #1a1a1a !important; }
+    .details-pane { display: none; background: #0a0a0a !important; }
+    .details-pane tr { background: #0a0a0a !important; }
+    .details-pane td { border-bottom: none !important; }
+    .child-row { font-size: 0.9rem; opacity: 0.7; border-left: 4px solid #333; }
+    .child-row:hover { opacity: 1; }
+    .trash-btn:hover { color: #f44336 !important; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="log">
-<head>
-    <meta charset="UTF-8">
-    <title>SPENCE | Daily Log</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .nav-tabs { border-bottom: 2px solid #333; }
-        .nav-tabs .nav-link { color: #888; border: none; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; }
-        .nav-tabs .nav-link.active { background: none; color: #4caf50 !important; border-bottom: 3px solid #4caf50; }
-        .stat-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem 1rem; height: 100%; display: flex; flex-direction: column; justify-content: center; }
-        .stat-label { font-size: 0.75rem; font-weight: 900; color: #888; letter-spacing: 1px; }
-        .stat-value { font-size: 2.2rem; font-weight: 900; line-height: 1.1; margin-top: 5px; }
-        .stat-sub { font-size: 0.8rem; font-weight: 700; color: #555; margin-top: 5px; }
-        .color-kj { color: #ff9800 !important; } 
-        .color-p { color: #2196f3 !important; } 
-        .color-f { color: #f44336 !important; } 
-        .color-c { color: #A349A4 !important; } 
-        .color-cost { color: #4caf50 !important; }
-        .table-dark { --bs-table-bg: #1a1a1a; --bs-table-border-color: #333; color: #e0e0e0; border-collapse: separate; border-spacing: 0; }
-        .entry-row { cursor: pointer; transition: 0.1s; border-left: 4px solid transparent; }
-        .entry-row:hover { background: #222 !important; }
-        .entry-row.expanded { border-left-color: #4caf50; background: #1a1a1a !important; }
-        .details-pane { display: none; background: #0a0a0a !important; }
-        .details-pane tr { background: #0a0a0a !important; }
-        .details-pane td { border-bottom: none !important; }
-        .child-row { font-size: 0.9rem; opacity: 0.7; border-left: 4px solid #333; }
-        .child-row:hover { opacity: 1; }
-        .trash-btn:hover { color: #f44336 !important; }
-        .date-control { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 5px 15px; display: inline-flex; align-items: center; gap: 10px; }
-        .datepicker-input { background: transparent; border: none; color: #e0e0e0; font-weight: 700; width: 130px; cursor: pointer; }
-        .datepicker-input::-webkit-calendar-picker-indicator { filter: invert(1); }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
-            <div class="col-md-6"><h2 class="fw-black uppercase mb-0">Daily Intake</h2></div>
-            <div class="col-md-6 text-end">
+            <div class="col-6 col-md-6"><h2 class="fw-black uppercase mb-0" style="font-size:clamp(1.2rem,4vw,2rem);">Daily Intake</h2></div>
+            <div class="col-6 col-md-6 text-end">
                 <div class="date-control">
                     <a href="?date=<?= $prev_date ?>" class="text-muted"><i class="bi bi-chevron-left"></i></a>
                     <input type="date" class="datepicker-input" value="<?= $current_date ?>" onchange="location.href='?date=' + this.value">
@@ -175,13 +142,12 @@ foreach ($log_entries as $entry) {
         </ul>
 
         <div class="row g-2 mb-4">
-            <div class="col-md-2"><div class="stat-card"><div class="stat-label uppercase">Energy <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_kj'], $goal_kj) ?>"></i></div><div class="stat-value color-kj" style="font-size: 1.8rem;"><?= number_format($daily['total_kj'] ?: 0) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-sub color-kj opacity-50">/ <?= number_format($goal_kj) ?> kJ</div></div></div>
-            <div class="col-md"><div class="stat-card"><div class="stat-label uppercase">Prot <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_p'], $goal_p) ?>"></i></div><div class="stat-value color-p" style="font-size: 1.5rem;"><?= number_format($daily['total_p'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
-            <div class="col-md"><div class="stat-card"><div class="stat-label uppercase">Fat <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_f'], $goal_f) ?>"></i></div><div class="stat-value color-f" style="font-size: 1.5rem;"><?= number_format($daily['total_f'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
-            <div class="col-md"><div class="stat-card"><div class="stat-label uppercase">Carb <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_c'], $goal_c) ?>"></i></div><div class="stat-value color-c" style="font-size: 1.5rem;"><?= number_format($daily['total_c'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
-            <div class="col-md-2 text-center"><div class="stat-card d-flex flex-column align-items-center justify-content-center"><div class="stat-label uppercase mb-2">Split</div><canvas id="dailyPie" style="max-height: 60px;"></canvas></div></div>
-            <div class="col-md"><div class="stat-card"><div class="stat-label uppercase">Cost <i class="bi bi-exclamation-circle <?= getAlertClass($daily_cost, $goal_cost) ?>"></i></div><div class="stat-value color-cost" style="font-size: 1.8rem;">$<?= number_format($daily_cost, 2) ?></div><div class="stat-sub color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div></div></div>
-            <div class="col-md-2"><div class="stat-card"><div class="stat-label uppercase">Prot ROI</div><div class="stat-value text-white" style="font-size: 1.8rem;"><?= $daily_cost > 0 ? number_format($daily['total_p'] / $daily_cost, 1) : '0' ?><span class="fs-6 text-muted ms-1">gP/$</span></div><div class="stat-sub text-white opacity-50">/ 10.0 gP/$</div></div></div>
+            <div class="col-6 col-md-2"><div class="stat-card"><div class="stat-label uppercase">Energy <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_kj'], $goal_kj) ?>"></i></div><div class="stat-value color-kj" style="font-size: 1.8rem;"><?= number_format($daily['total_kj'] ?: 0) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-sub color-kj opacity-50">/ <?= number_format($goal_kj) ?> kJ</div></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Prot <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_p'], $goal_p) ?>"></i></div><div class="stat-value color-p" style="font-size: 1.5rem;"><?= number_format($daily['total_p'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Fat <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_f'], $goal_f) ?>"></i></div><div class="stat-value color-f" style="font-size: 1.5rem;"><?= number_format($daily['total_f'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Carb <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_c'], $goal_c) ?>"></i></div><div class="stat-value color-c" style="font-size: 1.5rem;"><?= number_format($daily['total_c'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
+            <div class="col-6 col-md-2 text-center"><div class="stat-card d-flex flex-column align-items-center justify-content-center"><div class="stat-label uppercase mb-2">Split</div><canvas id="dailyPie" style="max-height: 60px;"></canvas></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Cost <i class="bi bi-exclamation-circle <?= getAlertClass($daily_cost, $goal_cost) ?>"></i></div><div class="stat-value color-cost" style="font-size: 1.8rem;">$<?= number_format($daily_cost, 2) ?></div><div class="stat-sub color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div></div></div>
         </div>
 
         <div class="card bg-dark border-secondary overflow-hidden">
@@ -189,9 +155,9 @@ foreach ($log_entries as $entry) {
                 <table class="table table-dark table-hover mb-0 align-middle">
                     <thead>
                         <tr class="text-muted x-small uppercase" style="background: #151515;">
-                            <th style="width: 40px;"></th><th style="width: 80px;">Time</th><th>Item</th><th class="text-center" style="width: 100px;">Amt</th>
-                            <th class="text-center color-kj" style="width: 100px;">kJ</th><th class="text-center color-p" style="width: 100px;">P</th><th class="text-center color-f" style="width: 100px;">F</th><th class="text-center color-c" style="width: 100px;">C</th>
-                            <th class="text-center color-cost" style="width: 100px;">Cost</th><th style="width: 50px;"></th>
+                            <th style="width: 40px;"></th><th style="width: 80px;">Time</th><th>Item</th><th class="d-none d-md-table-cell text-center" style="width: 100px;">Amt</th>
+                            <th class="d-none d-md-table-cell text-center color-kj" style="width: 100px;">kJ</th><th class="d-none d-md-table-cell text-center color-p" style="width: 100px;">P</th><th class="d-none d-md-table-cell text-center color-f" style="width: 100px;">F</th><th class="d-none d-md-table-cell text-center color-c" style="width: 100px;">C</th>
+                            <th class="d-none d-md-table-cell text-center color-cost" style="width: 100px;">Cost</th><th style="width: 50px;"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -200,14 +166,23 @@ foreach ($log_entries as $entry) {
                                 <tr class="entry-row" id="row-<?= $entry['id'] ?>" onclick="<?= $entry['recipe_id'] ? 'toggleLogDetails('.$entry['id'].')' : '' ?>">
                                     <td class="text-center"><?php if($entry['recipe_id']): ?><i class="bi bi-chevron-right chevron-<?= $entry['id'] ?>"></i><?php endif; ?></td>
                                     <td class="text-muted small"><?= date('H:i', strtotime($entry['local_consumed_at'])) ?></td>
-                                    <td><span class="fw-bold text-white"><?= htmlspecialchars($entry['product_name']) ?></span></td>
-                            <td class="text-center small"><?= $entry['amount'] ?><?= $entry['unit'] ?></td>
-                            <td class="text-center color-kj fw-bold"><?= number_format($entry['kj']) ?></td>
-                            <td class="text-center color-p fw-bold"><?= number_format($entry['protein'], 1) ?>g</td>
-                            <td class="text-center color-f fw-bold"><?= number_format($entry['fat'], 1) ?>g</td>
-                            <td class="text-center color-c fw-bold"><?= number_format($entry['carb'], 1) ?>g</td>
-                            <td class="text-center color-cost fw-bold">$<?= number_format($entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']), 2) ?></td>
-                            <td class="text-end"><button class="btn btn-link text-muted p-0 trash-btn" onclick="event.stopPropagation(); deleteEntry(<?= $entry['id'] ?>)"><i class="bi bi-trash"></i></button></td>
+                                    <td>
+                                        <span class="fw-bold text-white"><?= htmlspecialchars($entry['product_name']) ?></span>
+                                        <div class="d-flex d-md-none flex-wrap gap-2 mt-1 mob-macro-line">
+                                            <span class="color-kj"><?= number_format($entry['kj']) ?> kJ</span>
+                                            <span class="color-p"><?= number_format($entry['protein'], 1) ?>g P</span>
+                                            <span class="color-f"><?= number_format($entry['fat'], 1) ?>g F</span>
+                                            <span class="color-c"><?= number_format($entry['carb'], 1) ?>g C</span>
+                                            <span class="color-cost">$<?= number_format($entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']), 2) ?></span>
+                                        </div>
+                                    </td>
+                            <td class="d-none d-md-table-cell text-center small"><?= $entry['amount'] ?><?= $entry['unit'] ?></td>
+                            <td class="d-none d-md-table-cell text-center color-kj fw-bold"><?= number_format($entry['kj']) ?></td>
+                            <td class="d-none d-md-table-cell text-center color-p fw-bold"><?= number_format($entry['protein'], 1) ?>g</td>
+                            <td class="d-none d-md-table-cell text-center color-f fw-bold"><?= number_format($entry['fat'], 1) ?>g</td>
+                            <td class="d-none d-md-table-cell text-center color-c fw-bold"><?= number_format($entry['carb'], 1) ?>g</td>
+                            <td class="d-none d-md-table-cell text-center color-cost fw-bold">$<?= number_format($entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']), 2) ?></td>
+                            <td class="text-end"><button class="btn btn-link text-muted p-0 trash-btn" onclick="event.stopPropagation(); deleteEntry(<?= $entry['id'] ?>, '<?= $entry['source'] ?? 'inventory' ?>')"><i class="bi bi-trash"></i></button></td>
                         </tr>
                         <?php if($entry['recipe_id']): ?>
                         <tbody class="details-pane" id="details-<?= $entry['id'] ?>">
@@ -215,11 +190,11 @@ foreach ($log_entries as $entry) {
                             <tr class="child-row">
                                 <td></td><td class="text-center text-muted small"><i class="bi bi-arrow-return-right"></i></td>
                                 <td class="text-muted"><?= htmlspecialchars($ing['name']) ?></td>
-                                <td class="text-center text-muted small"><?= $ing['amount'] < 0.1 ? number_format($ing['amount'], 3) : number_format($ing['amount'], 2) ?><?= $ing['unit'] ?></td>
-                                <td class="text-center color-kj small"><?= number_format($ing['kj']) ?></td>
-                                <td class="text-center color-p small"><?= number_format($ing['p'], 1) ?>g</td>
-                                <td class="text-center color-f small"><?= number_format($ing['f'], 1) ?>g</td>
-                                <td class="text-center color-c small"><?= number_format($ing['c'], 1) ?>g</td>
+                                <td class="d-none d-md-table-cell text-center text-muted small"><?= $ing['amount'] < 0.1 ? number_format($ing['amount'], 3) : number_format($ing['amount'], 2) ?><?= $ing['unit'] ?></td>
+                                <td class="d-none d-md-table-cell text-center color-kj small"><?= number_format($ing['kj']) ?></td>
+                                <td class="d-none d-md-table-cell text-center color-p small"><?= number_format($ing['p'], 1) ?>g</td>
+                                <td class="d-none d-md-table-cell text-center color-f small"><?= number_format($ing['f'], 1) ?>g</td>
+                                <td class="d-none d-md-table-cell text-center color-c small"><?= number_format($ing['c'], 1) ?>g</td>
                                 <td colspan="2"></td>
                             </tr>
                             <?php endforeach; ?>
@@ -232,7 +207,6 @@ foreach ($log_entries as $entry) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     const ctx = document.getElementById('dailyPie').getContext('2d');
     new Chart(ctx, { 
@@ -275,7 +249,15 @@ foreach ($log_entries as $entry) {
         chevron.classList.toggle('bi-chevron-down', !isVisible);
         row.classList.toggle('expanded', !isVisible);
     }
-    function deleteEntry(id) { if (!confirm('Nuke this log entry? (Restores stock to inventory)')) return; const data = new FormData(); data.append('action', 'delete_log'); data.append('id', id); fetch('../core/raid_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if (res.status === 'success') location.reload(); else alert(res.message); }); }
+    function deleteEntry(id, source) {
+        const msg = source === 'quick_eat'
+            ? 'Delete this Quick Eat entry? (No inventory affected)'
+            : 'Delete this log entry? (Restores stock to inventory)';
+        if (!confirm(msg)) return;
+        const data = new FormData();
+        data.append('action', 'delete_log');
+        data.append('id', id);
+        fetch('../core/raid_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if (res.status === 'success') location.reload(); else alert(res.message); });
+    }
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

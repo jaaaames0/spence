@@ -40,12 +40,12 @@ function findPotentialMatches($db, $targetProductId = null) {
     $matches = [];
 
     if ($targetProductId) {
-        $stmt = $db->prepare("SELECT * FROM products WHERE id = ? AND merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL");
+        $stmt = $db->prepare("SELECT * FROM products WHERE id = ? AND merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL AND type != 'cooked'");
         $stmt->execute([$targetProductId]);
         $subject = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$subject) return [];
 
-        $stmt = $db->prepare("SELECT * FROM products WHERE id != ? AND merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL ORDER BY name ASC");
+        $stmt = $db->prepare("SELECT * FROM products WHERE id != ? AND merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL AND type != 'cooked' ORDER BY name ASC");
         $stmt->execute([$targetProductId]);
         $others = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -54,7 +54,7 @@ function findPotentialMatches($db, $targetProductId = null) {
             if ($m) $matches[] = $m;
         }
     } else {
-        $stmt = $db->query("SELECT * FROM products WHERE merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL ORDER BY name ASC");
+        $stmt = $db->query("SELECT * FROM products WHERE merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL AND type != 'cooked' ORDER BY name ASC");
         $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         for ($i = 0; $i < count($products); $i++) {
@@ -64,6 +64,17 @@ function findPotentialMatches($db, $targetProductId = null) {
             }
         }
     }
+
+    // Filter out dismissed pairs
+    $dismissed = $db->query("SELECT product_id_a, product_id_b FROM dedupe_dismissed")->fetchAll(PDO::FETCH_ASSOC);
+    $dismissedKeys = [];
+    foreach ($dismissed as $d) {
+        $dismissedKeys[min($d['product_id_a'], $d['product_id_b']) . '_' . max($d['product_id_a'], $d['product_id_b'])] = true;
+    }
+    $matches = array_values(array_filter($matches, function($m) use ($dismissedKeys) {
+        $key = min($m['p1']['id'], $m['p2']['id']) . '_' . max($m['p1']['id'], $m['p2']['id']);
+        return !isset($dismissedKeys[$key]);
+    }));
 
     return $matches;
 }
@@ -207,11 +218,16 @@ function findSubstitutes($db, $productName, $category = null) {
 
         if (count($shared) >= 1 || $levRatio < 0.3) {
             $subs[] = [
-                'id' => $p['id'],
-                'name' => $p['name'],
-                'stock' => $p['stock'],
-                'unit' => $p['base_unit'],
-                'match_score' => count($shared) - ($levRatio * 2) // Rough ranking
+                'id'             => $p['id'],
+                'name'           => $p['name'],
+                'stock'          => $p['stock'],
+                'unit'           => $p['base_unit'],
+                'match_score'    => count($shared) - ($levRatio * 2),
+                'kj_per_100'     => (float)$p['kj_per_100'],
+                'protein_per_100'=> (float)$p['protein_per_100'],
+                'fat_per_100'    => (float)$p['fat_per_100'],
+                'carb_per_100'   => (float)$p['carb_per_100'],
+                'weight_per_ea'  => (float)$p['weight_per_ea'],
             ];
         }
     }
@@ -220,7 +236,7 @@ function findSubstitutes($db, $productName, $category = null) {
     return array_slice($subs, 0, 5); // Return top 5
 }
 
-function executeProductMerge($db, $source_id, $target_id) {
+function executeProductMerge($db, $source_id, $target_id, $blend_macros = false) {
     try {
         $db->beginTransaction();
         $stmt = $db->prepare("SELECT merges_into FROM products WHERE id = ?");
@@ -234,12 +250,17 @@ function executeProductMerge($db, $source_id, $target_id) {
         $stmt->execute([$target_id]);
         $target = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($source && $target && $source_id != $target_id) {
-            $new_kj = ($source['kj_per_100'] + $target['kj_per_100']) / 2;
-            $new_p = ($source['protein_per_100'] + $target['protein_per_100']) / 2;
-            $new_f = ($source['fat_per_100'] + $target['fat_per_100']) / 2;
-            $new_c = ($source['carb_per_100'] + $target['carb_per_100']) / 2;
-            $db->prepare("UPDATE products SET kj_per_100 = ?, protein_per_100 = ?, fat_per_100 = ?, carb_per_100 = ? WHERE id = ?")
-               ->execute([$new_kj, $new_p, $new_f, $new_c, $target_id]);
+            if ($blend_macros) {
+                $db->prepare("UPDATE products SET kj_per_100 = ?, protein_per_100 = ?, fat_per_100 = ?, carb_per_100 = ? WHERE id = ?")
+                   ->execute([
+                       ($source['kj_per_100'] + $target['kj_per_100']) / 2,
+                       ($source['protein_per_100'] + $target['protein_per_100']) / 2,
+                       ($source['fat_per_100'] + $target['fat_per_100']) / 2,
+                       ($source['carb_per_100'] + $target['carb_per_100']) / 2,
+                       $target_id
+                   ]);
+            }
+            // Default: preserve target (canonical) macros unchanged
             $stmt = $db->prepare("SELECT * FROM inventory WHERE product_id = ?");
             $stmt->execute([$source_id]);
             $source_items = $stmt->fetchAll(PDO::FETCH_ASSOC);

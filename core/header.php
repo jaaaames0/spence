@@ -6,52 +6,43 @@ $current_page = basename(dirname($_SERVER['PHP_SELF']));
 if ($current_page == 'spence') $current_page = 'home';
 
 $nav_items = [
-    'stock' => ['label' => 'STOCK', 'url' => '/spence/stock/', 'icon' => 'bi-box-seam'],
-    'eat' => ['label' => 'EAT', 'url' => '/spence/eat/', 'icon' => 'bi-apple'],
-    'cook' => ['label' => 'COOK', 'url' => '/spence/cook/', 'icon' => 'bi-fire'],
-    'recipedb' => ['label' => 'RECIPEDB', 'url' => '/spence/recipedb/', 'icon' => 'bi-journal-bookmark'],
-    'log' => ['label' => 'LOG', 'url' => '/spence/log/', 'icon' => 'bi-calendar-check'],
-    'settings' => ['label' => 'SETTINGS', 'url' => '/spence/settings/index.php', 'icon' => 'bi-gear']
+    'stock'    => ['label' => 'STOCK',    'mlabel' => 'STOCK', 'url' => '/spence/stock/',          'icon' => 'bi-box-seam'],
+    'eat'      => ['label' => 'EAT',      'mlabel' => 'EAT',   'url' => '/spence/eat/',            'icon' => 'bi-apple'],
+    'cook'     => ['label' => 'COOK',     'mlabel' => 'COOK',  'url' => '/spence/cook/',           'icon' => 'bi-fire'],
+    'recipedb' => ['label' => 'RECIPEDB', 'mlabel' => 'DB',    'url' => '/spence/recipedb/',       'icon' => 'bi-journal-bookmark'],
+    'log'      => ['label' => 'LOG',      'mlabel' => 'LOG',   'url' => '/spence/log/',            'icon' => 'bi-calendar-check'],
+    'settings' => ['label' => 'SETTINGS', 'mlabel' => 'SET',   'url' => '/spence/settings/index.php', 'icon' => 'bi-gear'],
 ];
 ?>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 sticky-top" style="border-bottom: 2px solid #333; background: #0a0a0a !important;">
-    <div class="container-fluid px-4">
-        <a class="navbar-brand fw-black letter-spacing-tight" href="/spence/index.php" style="font-weight: 900; letter-spacing: -1.5px; font-size: 1.5rem;">
-            <span style="color: #00A3FF;">SPENCE</span><span class="text-muted" style="font-size: 0.8rem; letter-spacing: 0;">_v0.9</span>
+<nav class="navbar navbar-dark sticky-top mb-4" style="border-bottom: 2px solid #333; background: #0a0a0a !important;">
+    <div class="container-fluid px-4 d-flex align-items-center">
+        <a class="navbar-brand fw-black flex-shrink-0" href="/spence/index.php" style="font-weight: 900; letter-spacing: -1.5px; font-size: 1.5rem;">
+            <span style="color: #00A3FF;">SPENCE</span><span class="text-muted" style="font-size: 0.8rem; letter-spacing: 0;">_v1</span>
         </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav ms-auto gap-2">
-                <?php foreach ($nav_items as $key => $item): ?>
-                <li class="nav-item">
-                    <a class="nav-link <?= ($current_page == $key || strpos($_SERVER['PHP_SELF'], $item['url']) !== false) ? 'active' : '' ?>" href="<?= $item['url'] ?>" style="font-weight: 700; font-size: 0.85rem; letter-spacing: 0.5px;">
-                        <i class="bi <?= $item['icon'] ?> me-1"></i> <?= $item['label'] ?>
-                    </a>
-                </li>
-                <?php endforeach; ?>
-            </ul>
+
+        <!-- Mobile nav: single line, icon above label, no toggle needed -->
+        <div class="d-flex d-lg-none align-items-stretch ms-auto" style="flex: 1; justify-content: space-evenly;">
+            <?php foreach ($nav_items as $key => $item):
+                $active = ($current_page == $key || strpos($_SERVER['PHP_SELF'], $item['url']) !== false);
+            ?>
+            <a class="nav-link d-flex flex-column align-items-center justify-content-center px-1 <?= $active ? 'active' : '' ?>"
+               href="<?= $item['url'] ?>" style="font-weight: 700; min-width: 36px; padding-top: 6px; padding-bottom: 6px;">
+                <i class="bi <?= $item['icon'] ?>" style="font-size: 1.2rem; line-height: 1; display: block;"></i>
+                <span style="font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0; font-weight: 700; line-height: 1.3; margin-top: 3px;"><?= $item['mlabel'] ?></span>
+            </a>
+            <?php endforeach; ?>
+        </div>
+
+        <!-- Desktop nav: icon + text links -->
+        <div class="d-none d-lg-flex ms-auto gap-2">
+            <?php foreach ($nav_items as $key => $item):
+                $active = ($current_page == $key || strpos($_SERVER['PHP_SELF'], $item['url']) !== false);
+            ?>
+            <a class="nav-link <?= $active ? 'active' : '' ?>" href="<?= $item['url'] ?>"
+               style="font-weight: 700; font-size: 0.85rem; letter-spacing: 0.5px;">
+                <i class="bi <?= $item['icon'] ?> me-1"></i><?= $item['label'] ?>
+            </a>
+            <?php endforeach; ?>
         </div>
     </div>
 </nav>
-
-<style>
-    .fw-black { font-weight: 900; }
-    .letter-spacing-tight { letter-spacing: -1px; }
-    .nav-link { color: #888 !important; transition: all 0.2s; border-bottom: 2px solid transparent; }
-    .nav-link:hover { color: #fff !important; }
-    .nav-link.active { color: #00A3FF !important; border-bottom-color: #00A3FF; }
-    
-    [data-context="raid"] .nav-link.active, [data-context="raid"] .navbar-brand span:first-child { color: #ff9800 !important; border-bottom-color: #ff9800; }
-    [data-context="cook"] .nav-link.active, [data-context="cook"] .navbar-brand span:first-child { color: #f44336 !important; border-bottom-color: #f44336; }
-    [data-context="recipedb"] .nav-link.active, [data-context="recipedb"] .navbar-brand span:first-child { color: #A349A4 !important; border-bottom-color: #A349A4; }
-    [data-context="log"] .nav-link.active, [data-context="log"] .navbar-brand span:first-child { color: #4caf50 !important; border-bottom-color: #4caf50; }
-    [data-context="settings"] .nav-link.active, [data-context="settings"] .navbar-brand span:first-child { color: #6c757d !important; border-bottom-color: #6c757d; }
-    
-    .uppercase { text-transform: uppercase; }
-    .spin { animation: rotation 2s infinite linear; display: inline-block; }
-    @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(359deg); } }
-    .input-group .form-control { background-color: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
-    .input-group .input-group-text { background-color: #1a1a1a !important; border: 1px solid #333 !important; color: #888 !important; }
-</style>

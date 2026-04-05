@@ -2,25 +2,28 @@
 /**
  * PantryOS Upload Handler
  */
-$dbPath = __DIR__ . '/../database/spence.db';
+require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/db_helper.php';
+
 $uploadDir = __DIR__ . '/../uploads/';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['receipt'])) {
     $file = $_FILES['receipt'];
-    
-    // Basic validation
-    $allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
-    if (!in_array($file['type'], $allowedTypes)) {
+
+    // Detect actual MIME type from file contents, not user-supplied header
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $detected = $finfo->file($file['tmp_name']);
+    $allowedTypes = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'application/pdf' => 'pdf'];
+    if (!array_key_exists($detected, $allowedTypes)) {
         die("Invalid file type. Only JPG, PNG, and PDF allowed.");
     }
 
-    $filename = time() . '_' . basename($file['name']);
+    $filename = bin2hex(random_bytes(8)) . '.' . $allowedTypes[$detected];
     $targetPath = $uploadDir . $filename;
 
     if (move_uploaded_file($file['tmp_name'], $targetPath)) {
         try {
-            $db = new PDO('sqlite:' . $dbPath);
-            $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $db = get_db_connection();
 
             $stmt = $db->prepare("INSERT INTO jobs (file_path, status, message) VALUES (?, 'pending', 'Upload successful. Processing receipt...')");
             $stmt->execute([$targetPath]);

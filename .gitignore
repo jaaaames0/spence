@@ -13,6 +13,7 @@ database/*.db
 
 # API Keys and local config
 core/credentials.env
+core/openrouter.env
 core/keys.json
 .env
 
@@ -20,6 +21,10 @@ core/keys.json
 ingest/
 uploads/
 cache/
+
+# Generated logs and temp artifacts
+core/*.log
+core/*.base64
 
 # System / IDE
 .DS_Store

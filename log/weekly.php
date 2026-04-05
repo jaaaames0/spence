@@ -2,6 +2,7 @@
 /**
  * SPENCE | Weekly Trends & Macro Analysis (Phase 11.6: Interaction Stability)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -84,46 +85,29 @@ if ($user_id) {
         $goal_cost = $g['cost_limit_daily'];
     }
 }
+$page_title   = 'Weekly';
+$page_context = 'log';
+$extra_head   = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>';
+$extra_styles = '<style>
+    .stat-mini { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem 1rem; }
+    .stat-mini-label { font-size: 0.75rem; font-weight: 900; color: #888; letter-spacing: 1px; }
+    .stat-mini-value { font-size: 2.2rem; font-weight: 900; line-height: 1.1; margin-top: 5px; }
+    .toggle-badge { cursor: pointer; opacity: 0.4; transition: 0.2s; border: 1px solid transparent; font-weight: 800; }
+    .toggle-badge.active { opacity: 1; border-color: currentColor; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="log">
-<head>
-    <meta charset="UTF-8">
-    <title>SPENCE | Weekly Analysis</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .nav-tabs { border-bottom: 2px solid #333; }
-        .nav-tabs .nav-link { color: #888; border: none; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; }
-        .nav-tabs .nav-link.active { background: none; color: #4caf50 !important; border-bottom: 3px solid #4caf50; }
-        .chart-container { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem; }
-        .stat-mini { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem 1rem; }
-        .stat-mini-label { font-size: 0.75rem; font-weight: 900; color: #888; letter-spacing: 1px; }
-        .stat-mini-value { font-size: 2.2rem; font-weight: 900; line-height: 1.1; margin-top: 5px; }
-        .color-kj { color: #ff9800; } .color-p { color: #2196f3; } .color-f { color: #f44336; } .color-c { color: #A349A4; } .color-cost { color: #4caf50; }
-        .toggle-badge { cursor: pointer; opacity: 0.4; transition: 0.2s; border: 1px solid transparent; font-weight: 800; }
-        .toggle-badge.active { opacity: 1; border-color: currentColor; }
-        .date-control { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 5px 15px; display: inline-flex; align-items: center; gap: 10px; }
-        .datepicker-input { background: transparent; border: none; color: #e0e0e0; font-weight: 700; width: 130px; cursor: pointer; }
-        .datepicker-input::-webkit-calendar-picker-indicator { filter: invert(1); }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
-            <div class="col-md-4"><h2 class="fw-black uppercase mb-0">Analysis</h2></div>
-            <div class="col-md-8 text-end d-flex justify-content-end align-items-center gap-3">
+            <div class="col-6 col-md-4"><h2 class="fw-black uppercase mb-0" style="font-size:clamp(1.2rem,4vw,2rem);">Analysis</h2></div>
+            <div class="col-6 col-md-4 text-end">
                 <div class="date-control">
                     <a href="?view=<?= $view_type ?>&date=<?= $prev_week_date ?>" class="text-muted"><i class="bi bi-chevron-left"></i></a>
                     <input type="date" class="datepicker-input" value="<?= $current_date ?>" onchange="location.href='?view=<?= $view_type ?>&date=' + this.value">
                     <a href="?view=<?= $view_type ?>&date=<?= $next_week_date ?>" class="text-muted <?= $current_date >= $today_str ? 'opacity-25' : '' ?>"><i class="bi bi-chevron-right"></i></a>
                 </div>
+            </div>
+            <div class="col-12 col-md-4 d-flex justify-content-end mt-2 mt-md-0">
                 <div class="btn-group">
                     <a href="?view=rolling&date=<?= $current_date ?>" class="btn btn-sm <?= $view_type === 'rolling' ? 'btn-secondary' : 'btn-outline-secondary' ?> fw-bold">7D ROLLING</a>
                     <a href="?view=fixed&date=<?= $current_date ?>" class="btn btn-sm <?= $view_type === 'fixed' ? 'btn-secondary' : 'btn-outline-secondary' ?> fw-bold">MON-SUN</a>
@@ -154,12 +138,12 @@ if ($user_id) {
         <div class="row g-4 align-items-stretch">
             <div class="col-lg-8">
                 <div class="row g-2 h-100">
-                    <div class="col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG kJ</div><div class="stat-mini-value color-kj" style="font-size: 1.8rem;"><?= number_format($avgs['kj']) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-mini-label color-kj opacity-50">/ <?= number_format($goal_kj, 1) ?> kJ</div></div></div>
-                    <div class="col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Prot</div><div class="stat-mini-value color-p" style="font-size: 1.8rem;"><?= number_format($avgs['p'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
-                    <div class="col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Fat</div><div class="stat-mini-value color-f" style="font-size: 1.8rem;"><?= number_format($avgs['f'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
-                    <div class="col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Carb</div><div class="stat-mini-value color-c" style="font-size: 1.8rem;"><?= number_format($avgs['c'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
-                    <div class="col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Cost</div><div class="stat-mini-value color-cost" style="font-size: 1.8rem;">$<?= number_format($avgs['cost'], 2) ?></div><div class="stat-mini-label color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div></div></div>
-                    <div class="col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">Active Days</div><div class="stat-mini-value text-white" style="font-size: 1.8rem;"><?= $active_days ?> <span class="fs-6 text-muted">/ 7</span></div></div></div>
+                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG kJ</div><div class="stat-mini-value color-kj" style="font-size: 1.8rem;"><?= number_format($avgs['kj']) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-mini-label color-kj opacity-50">/ <?= number_format($goal_kj, 1) ?> kJ</div></div></div>
+                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Prot</div><div class="stat-mini-value color-p" style="font-size: 1.8rem;"><?= number_format($avgs['p'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
+                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Fat</div><div class="stat-mini-value color-f" style="font-size: 1.8rem;"><?= number_format($avgs['f'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
+                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Carb</div><div class="stat-mini-value color-c" style="font-size: 1.8rem;"><?= number_format($avgs['c'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
+                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Cost</div><div class="stat-mini-value color-cost" style="font-size: 1.8rem;">$<?= number_format($avgs['cost'], 2) ?></div><div class="stat-mini-label color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div></div></div>
+                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">Active Days</div><div class="stat-mini-value text-white" style="font-size: 1.8rem;"><?= $active_days ?> <span class="fs-6 text-muted">/ 7</span></div></div></div>
                 </div>
             </div>
             
@@ -177,7 +161,6 @@ if ($user_id) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     const labels = <?= json_encode(array_map(function($d) { return date('D d/m', strtotime($d)); }, array_keys($chart_data))) ?>;
     const chartData = {
@@ -256,5 +239,4 @@ if ($user_id) {
     const pieCtx = document.getElementById('weeklyPie').getContext('2d');
     new Chart(pieCtx, { type: 'pie', data: { labels: ['Protein', 'Fat', 'Carbs'], datasets: [{ data: [<?= $avgs['p'] ?: 0.1 ?>, <?= $avgs['f'] ?: 0.1 ?>, <?= $avgs['c'] ?: 0.1 ?>], backgroundColor: ['#2196f3', '#f44336', '#A349A4'], borderWidth: 0 }] }, options: { plugins: { legend: { display: false } } } });
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

@@ -2,6 +2,7 @@
 /**
  * SPENCE Raid: Cook (Phase 11.7: Tag Grouping & Multi-Categorization)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -51,36 +52,15 @@ uksort($groupedRecipes, function($a, $b) use ($preferredTags) {
     return strcasecmp($a, $b);
 });
 
+$page_title   = 'Cook';
+$page_context = 'cook';
+$extra_styles = '<style>
+    .card-cook { cursor: pointer; text-decoration: none; color: #e0e0e0; transition: 0.2s; }
+    .card-cook:hover { border-color: #f44336 !important; background: #252525 !important; color: #fff; }
+    .tag-header { border-left: 4px solid #f44336; padding-left: 12px; margin: 2rem 0 1rem 0; color: #f44336 !important; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; font-size: 1rem; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="cook">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPENCE | Cook</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .tag-header { border-left: 4px solid #f44336; padding-left: 15px; margin: 2.5rem 0 1rem 0; color: #f44336 !important; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; font-size: 1rem; }
-        .card-cook { background-color: #1e1e1e; border: 1px solid #333; cursor: pointer; transition: 0.2s; color: #e0e0e0; border-radius: 4px; text-decoration: none; display: block; }
-        .card-cook:hover { border-color: #f44336; background-color: #252525; }
-        .badge-kj { background-color: #ff9800; color: #000; font-weight: bold; }
-        .badge-p { background-color: #2196f3; color: #fff; font-weight: bold; }
-        .badge-cost { background-color: #4caf50; color: #000; font-weight: bold; }
-        .badge-tag { background: #333; color: #888; font-size: 0.6rem; padding: 2px 5px; border-radius: 3px; font-weight: 800; border: 1px solid #444; }
-        .qty-large { font-size: 1.25rem; font-weight: 800; color: #fff !important; }
-        .unit-label { color: #666 !important; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .form-control { background-color: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
-        .form-control::placeholder { color: #888 !important; opacity: 1; }
-        .fw-black { font-weight: 900; }
-        .uppercase { text-transform: uppercase; }
-        .product-name { font-size: 1.1rem; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; height: 2.4em; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
             <div class="col-md-3"><h2 class="fw-black mb-0 uppercase">Execute Recipes</h2></div>
@@ -95,7 +75,7 @@ uksort($groupedRecipes, function($a, $b) use ($preferredTags) {
                     <span><span class="badge badge-kj me-1">#</span> kJ</span>
                     <span><span class="badge badge-p me-1">#</span> Protein</span>
                     <span><span class="badge badge-cost me-1">$</span> Cost</span>
-                    <span class="text-white">(per serve)</span>
+                    <span class="d-none d-md-inline text-white">(per serve)</span>
                 </div>
             </div>
         </div>
@@ -134,7 +114,6 @@ uksort($groupedRecipes, function($a, $b) use ($preferredTags) {
             <?php endforeach; ?>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         function filterCards(query) {
             const q = query.toLowerCase();
@@ -175,5 +154,5 @@ uksort($groupedRecipes, function($a, $b) use ($preferredTags) {
             }
         }
     </script>
-</body>
+<?php include '../core/page_foot.php'; ?>
 </html>

@@ -2,6 +2,7 @@
 /**
  * SPENCE | Progress Tracking (Phase 11: Analytics)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -26,37 +27,19 @@ if ($user_id) {
 
 // Latest Vitals for modal defaults
 $latest_vitals = end($vitals_history) ?: ['weight_kg' => '', 'body_fat_pct' => ''];
+$page_title   = 'Progress';
+$page_context = 'log';
+$extra_head   = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>';
+$extra_styles = '<style>
+    .stat-value { font-size: 2.2rem; font-weight: 900; line-height: 1.1; margin-top: 5px; }
+    .btn-primary { background-color: #6c757d; border-color: #6c757d; color: #fff; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="log">
-<head>
-    <meta charset="UTF-8">
-    <title>SPENCE | Progress Tracking</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .nav-tabs { border-bottom: 2px solid #333; }
-        .nav-tabs .nav-link { color: #888; border: none; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; }
-        .nav-tabs .nav-link.active { background: none; color: #4caf50 !important; border-bottom: 3px solid #4caf50; }
-        .chart-container { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1.5rem; }
-        .stat-label { font-size: 0.7rem; font-weight: 900; color: #666; letter-spacing: 1px; margin-bottom: 2px; }
-        .stat-value { font-size: 1.5rem; font-weight: 900; color: #fff; line-height: 1; }
-        .modal-content { background: #1a1a1a; border: 1px solid #444; color: #e0e0e0; }
-        .form-control { background: #2b2b2b !important; border: 1px solid #444 !important; color: #fff !important; }
-        .btn-primary { background-color: #6c757d; border-color: #6c757d; color: #fff; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
-            <div class="col-md-6"><h2 class="fw-black uppercase mb-0">Progress</h2></div>
-            <div class="col-md-6 text-end">
+            <div class="col-6 col-md-6"><h2 class="fw-black uppercase mb-0" style="font-size:clamp(1.2rem,4vw,2rem);">Progress</h2></div>
+            <div class="col-6 col-md-6 text-end">
                 <button class="btn btn-sm btn-outline-secondary px-3 fw-bold" data-bs-toggle="modal" data-bs-target="#weighInModal">WEIGH IN</button>
             </div>
         </div>
@@ -128,7 +111,6 @@ $latest_vitals = end($vitals_history) ?: ['weight_kg' => '', 'body_fat_pct' => '
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     const labels = <?= json_encode(array_map(function($v) { return date('j M', strtotime($v['local_recorded_at'])); }, $vitals_history)) ?>;
     const weightData = <?= json_encode(array_column($vitals_history, 'weight_kg')) ?>;
@@ -207,5 +189,4 @@ $latest_vitals = end($vitals_history) ?: ['weight_kg' => '', 'body_fat_pct' => '
         });
     }
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

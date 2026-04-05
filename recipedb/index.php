@@ -4,6 +4,7 @@
  * High-density table with child ingredients, instructions, and tags.
  * Only shows active (latest) versions. Historical kept for logs.
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -35,8 +36,14 @@ foreach ($recipes as &$r) {
 }
 unset($r); // Break the reference to avoid the "Double Row" ghosting bug
 
-// 2. Fetch Master Products for Ingredient Datalist
-$stmt = $db->query("SELECT id, name, base_unit FROM products WHERE merges_into IS NULL AND is_dropped = 0 AND type = 'raw' ORDER BY name ASC");
+// 2. Fetch Master Products for Ingredient Autocomplete (includes macros + current stock)
+$stmt = $db->query("
+    SELECT p.id, p.name, p.base_unit, p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100, p.weight_per_ea, p.last_unit_cost,
+           COALESCE((SELECT SUM(i.current_qty) FROM inventory i WHERE i.product_id = p.id AND i.current_qty > 0), 0) as stock_qty
+    FROM products p
+    WHERE p.merges_into IS NULL AND p.is_dropped = 0 AND p.type = 'raw'
+    ORDER BY p.name ASC
+");
 $all_raw_products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // 3. Fetch Master Tags (Auto-populated from existing recipe tags)
@@ -51,59 +58,29 @@ foreach ($raw_tags as $rt) {
 }
 sort($all_tags);
 
+$page_title   = 'RecipeDB';
+$page_context = 'recipedb';
+$extra_styles = '<style>
+    .recipe-row { cursor: pointer; transition: 0.2s; border-left: 4px solid transparent; }
+    .recipe-row:hover { background: #262626 !important; }
+    .recipe-row.expanded { background: #262626 !important; border-left-color: #A349A4; }
+    .details-pane { background: #151515; border-top: 1px solid #333; display: none; }
+    .text-accent { color: #A349A4 !important; }
+    .ingredient-row { background: #252525; border-radius: 8px; margin-bottom: 8px; border: 1px solid #333; padding: 0.5rem !important; }
+    .tag-pill { display: inline-block; background: #A349A4; color: #fff; padding: 2px 10px; border-radius: 20px; font-size: 0.7rem; margin-right: 5px; margin-bottom: 5px; font-weight: 700; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
+    .tag-pill:hover { background: #8e3f8e; transform: scale(1.05); }
+    .tag-pill.inactive { background: #222; color: #888; border-color: #444; }
+    .tag-container { max-height: 120px; overflow-y: auto; padding: 10px; background: #151515; border-radius: 4px; border: 1px solid #333; }
+    .tag-container::-webkit-scrollbar { width: 4px; }
+    .tag-container::-webkit-scrollbar-track { background: #0a0a0a; }
+    .tag-container::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+    .modal-content { background: #1e1e1e; border: 1px solid #444; color: #e0e0e0; }
+    .form-control, .form-select { background: #333 !important; border: 1px solid #444 !important; color: #fff !important; }
+    .form-control::placeholder { color: #888 !important; opacity: 1; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="recipedb">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPENCE | RecipeDB</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .table { color: #e0e0e0; vertical-align: middle; border-color: #333; }
-        .table-dark { --bs-table-bg: #1e1e1e; --bs-table-border-color: #333; }
-        .recipe-row { cursor: pointer; transition: 0.2s; border-left: 4px solid transparent; }
-        .recipe-row:hover { background: #262626 !important; }
-        .recipe-row.expanded { background: #262626 !important; border-left-color: #A349A4; }
-        .details-pane { background: #151515; border-top: 1px solid #333; display: none; }
-        .modal-content { background: #1e1e1e; border: 1px solid #444; color: #e0e0e0; }
-        .form-control, .form-select { background: #333 !important; border: 1px solid #444 !important; color: #fff !important; }
-        .form-control::placeholder { color: #888 !important; opacity: 1; }
-        .badge-kj { background-color: #ff9800; color: #000; font-weight: bold; }
-        .badge-protein { background-color: #2196f3; color: #fff; font-weight: bold; }
-        .badge-fat { background-color: #f44336; color: #fff; font-weight: bold; }
-        .badge-carb { background-color: #9c27b0; color: #fff; font-weight: bold; }
-        .badge-cost { background-color: #4caf50; color: #000; font-weight: bold; }
-        .badge-tag { background: #444; color: #ccc; font-weight: 600; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; border: 1px solid #555; }
-        .text-muted { color: #888 !important; }
-        .text-accent { color: #A349A4 !important; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .x-small { font-size: 0.7rem; }
-        .btn-icon { background: none; border: none; color: #888; padding: 0 5px; cursor: pointer; transition: color 0.2s; }
-        .btn-icon:hover .bi-pencil { color: #ffc107; }
-        .btn-icon:hover .bi-trash { color: #ff4444; }
-        .ingredient-row { background: #252525; border-radius: 8px; margin-bottom: 8px; border: 1px solid #333; padding: 0.5rem !important; }
-        .tag-pill { display: inline-block; background: #A349A4; color: #fff; padding: 2px 10px; border-radius: 20px; font-size: 0.7rem; margin-right: 5px; margin-bottom: 5px; font-weight: 700; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
-        .tag-pill:hover { background: #8e3f8e; transform: scale(1.05); }
-        .tag-pill.inactive { background: #222; color: #888; border-color: #444; }
-        .tag-container { max-height: 120px; overflow-y: auto; padding: 10px; background: #151515; border-radius: 4px; border: 1px solid #333; }
-        .tag-container::-webkit-scrollbar { width: 4px; }
-        .tag-container::-webkit-scrollbar-track { background: #0a0a0a; }
-        .tag-container::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     
-    <datalist id="productList">
-        <?php foreach ($all_raw_products as $p): ?>
-            <option value="<?= htmlspecialchars($p['name']) ?>" data-unit="<?= $p['base_unit'] ?>">
-        <?php endforeach; ?>
-    </datalist>
-
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
             <div class="col-md-3"><h2 class="fw-black uppercase mb-0">RecipeDB</h2></div>
@@ -125,17 +102,17 @@ sort($all_tags);
                         <tr class="small">
                             <th style="width: 40px;"></th>
                             <th>NAME</th>
-                            <th class="text-center" style="width: 100px;">SERVES</th>
+                            <th class="d-none d-md-table-cell text-center" style="width: 100px;">SERVES</th>
                             <th class="text-center" style="width: 100px;">kJ / SERVE</th>
                             <th class="text-center" style="width: 110px;">PROTEIN / SERVE</th>
-                            <th class="text-center" style="width: 100px;">FAT / SERVE</th>
-                            <th class="text-center" style="width: 100px;">CARBS / SERVE</th>
+                            <th class="d-none d-md-table-cell text-center" style="width: 100px;">FAT / SERVE</th>
+                            <th class="d-none d-md-table-cell text-center" style="width: 100px;">CARBS / SERVE</th>
                             <th class="text-center" style="width: 100px;">$ / SERVE</th>
                             <th class="text-end" style="width: 100px;">ACTIONS</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($recipes as $r): 
+                        <?php foreach ($recipes as $r):
                             $tags = array_map('trim', explode(',', $r['tags']));
                             $tags = array_filter($tags);
                         ?>
@@ -143,12 +120,15 @@ sort($all_tags);
                             <td class="text-center"><i class="bi bi-chevron-right chevron-<?= $r['id'] ?>"></i></td>
                             <td>
                                 <div class="fw-bold product-name"><?= htmlspecialchars($r['name']) ?></div>
+                                <div class="d-flex d-md-none gap-1 mt-1">
+                                    <span class="text-muted" style="font-size:0.65rem;"><?= $r['yield_serves'] ?> <span class="uppercase">serves</span></span>
+                                </div>
                             </td>
-                            <td class="text-center"><?= $r['yield_serves'] ?> <small class="text-muted x-small uppercase fw-bold">serves</small></td>
+                            <td class="d-none d-md-table-cell text-center"><?= $r['yield_serves'] ?> <small class="text-muted x-small uppercase fw-bold">serves</small></td>
                             <td class="text-center"><span class="badge badge-kj"><?= $r['kj_port'] ?></span></td>
                             <td class="text-center"><span class="badge badge-protein"><?= $r['p_port'] ?>g</span></td>
-                            <td class="text-center"><span class="badge badge-fat"><?= $r['f_port'] ?>g</span></td>
-                            <td class="text-center"><span class="badge badge-carb"><?= $r['c_port'] ?>g</span></td>
+                            <td class="d-none d-md-table-cell text-center"><span class="badge badge-fat"><?= $r['f_port'] ?>g</span></td>
+                            <td class="d-none d-md-table-cell text-center"><span class="badge badge-carb"><?= $r['c_port'] ?>g</span></td>
                             <td class="text-center"><span class="badge badge-cost">$<?= $r['cost_port'] ?></span></td>
                             <td class="text-end">
                                 <button class="btn-icon" onclick="event.stopPropagation(); openEditModal(<?= htmlspecialchars(json_encode($r)) ?>)" title="Edit">
@@ -205,33 +185,64 @@ sort($all_tags);
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="mb-3">
-                            <label class="form-label small fw-bold text-muted uppercase">Name</label>
-                            <input type="text" class="form-control" name="name" id="modalName" required>
-                        </div>
-                        <div class="row mb-3">
+                        <!-- Row 1: Name + Servings -->
+                        <div class="row mb-3 align-items-end">
+                            <div class="col-md-9">
+                                <label class="form-label small fw-bold text-muted uppercase">Name</label>
+                                <input type="text" class="form-control" name="name" id="modalName" required>
+                            </div>
                             <div class="col-md-3">
                                 <label class="form-label small fw-bold text-muted uppercase">Servings</label>
                                 <input type="number" class="form-control" name="yield" id="modalYield" value="1" min="1">
                             </div>
+                        </div>
+
+                        <!-- Row 2: Ingredients + Macro box -->
+                        <div class="row mb-3">
                             <div class="col-md-9">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <label class="form-label small fw-bold text-muted uppercase mb-0">Ingredients</label>
+                                    <button type="button" class="btn btn-sm btn-outline-info fw-bold" onclick="addIngredientRow()">ADD</button>
+                                </div>
+                                <div id="ingredientList"></div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small fw-bold text-muted uppercase d-block" style="visibility:hidden;">m</label>
+                                <div id="macroPrevBox" class="p-2 rounded" style="background:#0a0a0a; border:1px solid #2a2a2a; display:grid; grid-template-columns:1fr 1fr; gap:26px 10px;">
+                                    <div class="text-muted fw-bold uppercase" style="font-size:0.55rem; letter-spacing:1px; align-self:center;">Per Serve</div>
+                                    <div><span id="prevKj" class="fw-bold" style="color:#ff9800;">—</span> <span style="color:#555; font-size:0.7rem;">kJ</span></div>
+                                    <div><span id="prevP" class="fw-bold" style="color:#5c9bff;">—</span> <span style="color:#555; font-size:0.7rem;">g P</span></div>
+                                    <div><span id="prevF" class="fw-bold" style="color:#f44336;">—</span> <span style="color:#555; font-size:0.7rem;">g F</span></div>
+                                    <div><span id="prevC" class="fw-bold" style="color:#ab47bc;">—</span> <span style="color:#555; font-size:0.7rem;">g C</span></div>
+                                    <div><span style="color:#555; font-size:0.7rem;">$</span><span id="prevCost" class="fw-bold" style="color:#4caf50;">—</span></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Row 3: Tags + Spices -->
+                        <div class="row mb-3">
+                            <div class="col-md-5">
                                 <label class="form-label small fw-bold text-muted uppercase">Tags</label>
                                 <input type="text" class="form-control" name="tags" id="modalTags" placeholder="e.g. Breakfast, High Protein">
                                 <div class="mt-2 tag-container">
-                                    <?php 
-                                        foreach ($all_tags as $tag): 
-                                    ?>
+                                    <?php foreach ($all_tags as $tag): ?>
                                         <span class="tag-pill inactive" onclick="toggleTag(this, '<?= addslashes($tag) ?>')"><?= htmlspecialchars($tag) ?></span>
                                     <?php endforeach; ?>
                                 </div>
                             </div>
+                            <div class="col-md-7">
+                                <label class="form-label small fw-bold text-muted uppercase mb-1">
+                                    Spices
+                                    <span id="spiceSelCount" class="badge ms-1" style="background:#555; font-size:0.6rem; display:none;"></span>
+                                </label>
+                                <div id="spiceCheckGrid" class="d-flex flex-wrap gap-1 p-2 rounded" style="background:#0d0d0d; border:1px solid #2a2a2a; min-height:66px; max-height:130px; overflow-y:auto;">
+                                    <span class="text-muted small">Loading...</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <label class="form-label small fw-bold text-muted uppercase">Ingredients</label>
-                            <button type="button" class="btn btn-sm btn-outline-info fw-bold" onclick="addIngredientRow()">ADD INGREDIENT</button>
-                        </div>
-                        <div id="ingredientList"></div>
-                        <div class="mt-4">
+
+                        <!-- Row 4: Instructions -->
+                        <div class="mb-1">
                             <label class="form-label small fw-bold text-muted uppercase">Instructions</label>
                             <textarea class="form-control" name="instructions" id="modalInstructions" rows="5"></textarea>
                         </div>
@@ -245,7 +256,6 @@ sort($all_tags);
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const recipeModal = new bootstrap.Modal(document.getElementById('recipeModal'));
         const productData = <?= json_encode($all_raw_products) ?>;
@@ -289,8 +299,10 @@ sort($all_tags);
             document.getElementById('modalRecipeId').value = '';
             document.getElementById('recipeForm').reset();
             document.getElementById('ingredientList').innerHTML = '';
+            recalcPreview();
             updateTagPills('');
             addIngredientRow();
+            loadSpiceCheckboxes(null);
             recipeModal.show();
         }
 
@@ -301,43 +313,182 @@ sort($all_tags);
             document.getElementById('modalYield').value = recipe.yield_serves;
             document.getElementById('modalTags').value = recipe.tags;
             document.getElementById('modalInstructions').value = recipe.instructions;
-            
+
             updateTagPills(recipe.tags);
-            
+
             const list = document.getElementById('ingredientList');
             list.innerHTML = '';
             recipe.ingredients.forEach(ing => addIngredientRow(ing));
-            
+            recalcPreview();
+
+            loadSpiceCheckboxes(recipe.id);
             recipeModal.show();
         }
 
         function addIngredientRow(ing = null) {
             const div = document.createElement('div');
-            div.className = 'ingredient-row row g-2 align-items-center';
+            div.className = 'ingredient-row d-flex align-items-center gap-1 mb-1';
+            div.dataset.productId = ing ? (ing.product_id || '') : '';
             div.innerHTML = `
-                <div class="col-md-7">
-                    <input type="text" name="ing_product[]" class="form-control form-control-sm" list="productList" placeholder="Product..." value="${ing ? ing.product_name : ''}" onchange="updateUnit(this)" required>
+                <div style="flex:1 1 0; min-width:0; position:relative;">
+                    <input type="text" name="ing_product[]" class="form-control form-control-sm ing-search"
+                           placeholder="Ingredient..." value="${ing ? escHtml(ing.product_name) : ''}"
+                           oninput="showAcDropdown(this)" onblur="hideAcDropdown(this)" autocomplete="off" required>
+                    <div class="ac-dropdown list-group" style="display:none; position:absolute; z-index:1050; width:100%; max-height:220px; overflow-y:auto; top:100%; left:0;"></div>
                 </div>
-                <div class="col-md-2">
-                    <input type="number" step="0.001" name="ing_amount[]" class="form-control form-control-sm" placeholder="Amt" value="${ing ? ing.amount : ''}" required>
+                <div style="flex:0 0 60px;">
+                    <input type="number" step="0.001" name="ing_amount[]" class="form-control form-control-sm ing-amount"
+                           placeholder="Qty" value="${ing ? ing.amount : ''}" oninput="recalcPreview()" required
+                           style="padding:2px 4px; text-align:center;">
                 </div>
-                <div class="col-md-2">
-                    <input type="text" name="ing_unit[]" class="form-control-plaintext form-control-sm fw-bold text-white px-2" value="${ing ? ing.unit : ''}" readonly>
+                <div style="flex:0 0 auto;">
+                    <span class="ing-unit fw-bold text-white" style="font-size:0.75rem; white-space:nowrap;">${ing ? ing.unit : '—'}</span>
+                    <input type="hidden" name="ing_unit[]" value="${ing ? ing.unit : ''}">
                 </div>
-                <div class="col-md-1 text-center">
-                    <button type="button" class="btn-icon text-danger" onclick="this.closest('.ingredient-row').remove()"><i class="bi bi-trash"></i></button>
+                <div style="flex:0 0 auto;">
+                    <button type="button" class="btn-icon ing-stock-btn"
+                            style="color:#555; background:none; border:none; padding:2px 4px;"
+                            title="Use all available stock" onclick="useAllStock(this)"
+                            onmouseenter="if(this.dataset.stock) this.style.color='#4caf50';"
+                            onmouseleave="this.style.color='#555';">
+                        <i class="bi bi-arrow-up-circle"></i>
+                    </button>
+                </div>
+                <div style="flex:0 0 auto;">
+                    <button type="button" class="btn-icon"
+                            style="color:#555; background:none; border:none; padding:2px 4px;"
+                            onclick="this.closest('.ingredient-row').remove(); recalcPreview()"
+                            onmouseenter="this.style.color='#f44336'" onmouseleave="this.style.color='#555'">
+                        <i class="bi bi-trash"></i>
+                    </button>
                 </div>
             `;
             document.getElementById('ingredientList').appendChild(div);
-        }
 
-        function updateUnit(input) {
-            const product = productData.find(p => p.name === input.value);
-            if (product) {
-                const row = input.closest('.ingredient-row');
-                row.querySelector('input[name="ing_unit[]"]').value = product.base_unit;
+            // If editing an existing ingredient, populate the stock button immediately
+            if (ing && ing.product_id) {
+                const product = productData.find(p => p.id == ing.product_id);
+                if (product) setStockBtn(div, product);
             }
         }
+
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // ---- Autocomplete ----
+        function showAcDropdown(input) {
+            const q = input.value.trim().toLowerCase();
+            const dropdown = input.nextElementSibling;
+            if (q.length < 1) { dropdown.style.display = 'none'; return; }
+
+            const matches = productData.filter(p => p.name.toLowerCase().includes(q)).slice(0, 10);
+            if (!matches.length) { dropdown.style.display = 'none'; return; }
+
+            dropdown.innerHTML = matches.map(p => {
+                const stock = p.stock_qty > 0
+                    ? `<span style="color:#4caf50; font-size:0.65rem; white-space:nowrap;">${fmtQty(p.stock_qty)} ${p.base_unit}</span>`
+                    : '';
+                return `<button type="button" class="list-group-item list-group-item-action py-1 px-2 d-flex align-items-center justify-content-between gap-2"
+                                style="background:#2a2a2a; border-color:#444; color:#ddd; font-size:0.85rem;"
+                                onmousedown="selectIngredient(this.closest('.ingredient-row'), ${p.id})">
+                            <span>${escHtml(p.name)}</span>${stock}
+                        </button>`;
+            }).join('');
+            dropdown.style.display = 'block';
+        }
+
+        function hideAcDropdown(input) {
+            // Delay so onmousedown on a dropdown item fires first
+            setTimeout(() => {
+                const dropdown = input.nextElementSibling;
+                if (dropdown) dropdown.style.display = 'none';
+            }, 200);
+        }
+
+        function selectIngredient(row, productId) {
+            const product = productData.find(p => p.id === productId);
+            if (!product) return;
+
+            row.dataset.productId = productId;
+            row.querySelector('.ing-search').value = product.name;
+            row.querySelector('.ing-unit').innerText = product.base_unit;
+            row.querySelector('input[name="ing_unit[]"]').value = product.base_unit;
+
+            const dropdown = row.querySelector('.ac-dropdown');
+            if (dropdown) dropdown.style.display = 'none';
+
+            setStockBtn(row, product);
+            row.querySelector('.ing-amount').focus();
+            recalcPreview();
+        }
+
+        function setStockBtn(row, product) {
+            const btn = row.querySelector('.ing-stock-btn');
+            if (product.stock_qty > 0) {
+                btn.dataset.stock = product.stock_qty;
+                btn.title = `${fmtQty(product.stock_qty)} ${product.base_unit} in stock — click to use all`;
+                btn.style.color = '#555';
+                btn.style.borderColor = '#333';
+            } else {
+                delete btn.dataset.stock;
+                btn.title = 'No stock available';
+                btn.style.color = '#333';
+                btn.style.borderColor = '#222';
+            }
+        }
+
+        function useAllStock(btn) {
+            if (!btn.dataset.stock) return;
+            btn.closest('.ingredient-row').querySelector('.ing-amount').value = parseFloat(btn.dataset.stock).toFixed(3);
+            recalcPreview();
+        }
+
+        function fmtQty(qty) {
+            const n = parseFloat(qty);
+            return n === Math.floor(n) ? n.toString() : n.toFixed(3).replace(/\.?0+$/, '');
+        }
+
+        // ---- Live macro preview ----
+        function recalcPreview() {
+            const serves = parseInt(document.getElementById('modalYield').value) || 1;
+            let totalKj = 0, totalP = 0, totalF = 0, totalC = 0, totalCost = 0, hasData = false;
+
+            document.querySelectorAll('.ingredient-row').forEach(row => {
+                const productId = parseInt(row.dataset.productId);
+                const amount = parseFloat(row.querySelector('.ing-amount')?.value) || 0;
+                const unit = row.querySelector('input[name="ing_unit[]"]')?.value;
+                if (!productId || amount <= 0) return;
+
+                const product = productData.find(p => p.id === productId);
+                if (!product) return;
+
+                hasData = true;
+                const weightKg = (unit === 'ea') ? (amount * product.weight_per_ea) : amount;
+                const factor = weightKg / 0.1;
+                totalKj   += product.kj_per_100 * factor;
+                totalP    += product.protein_per_100 * factor;
+                totalF    += product.fat_per_100 * factor;
+                totalC    += product.carb_per_100 * factor;
+                totalCost += (product.last_unit_cost || 0) * amount;
+            });
+
+            if (!hasData) {
+                document.getElementById('prevKj').innerText   = '—';
+                document.getElementById('prevP').innerText    = '—';
+                document.getElementById('prevF').innerText    = '—';
+                document.getElementById('prevC').innerText    = '—';
+                document.getElementById('prevCost').innerText = '—';
+                return;
+            }
+            document.getElementById('prevKj').innerText   = Math.round(totalKj / serves).toLocaleString();
+            document.getElementById('prevP').innerText    = (totalP / serves).toFixed(1);
+            document.getElementById('prevF').innerText    = (totalF / serves).toFixed(1);
+            document.getElementById('prevC').innerText    = (totalC / serves).toFixed(1);
+            document.getElementById('prevCost').innerText = (totalCost / serves).toFixed(2);
+        }
+
+        document.getElementById('modalYield').addEventListener('input', recalcPreview);
 
         function toggleTag(pill, tag) {
             let tagsInput = document.getElementById('modalTags');
@@ -371,9 +522,66 @@ sort($all_tags);
             fetch('../core/api.php', { method: 'POST', body: data })
                 .then(r => r.json())
                 .then(res => {
-                    if (res.status === 'success') location.reload();
-                    else alert('Error: ' + res.message);
+                    if (res.status !== 'success') { alert('Error: ' + res.message); return; }
+                    // Save spice associations then reload
+                    const savedId = res.id;
+                    const checked = [...document.querySelectorAll('.spice-check:checked')].map(c => parseInt(c.value));
+                    const spiceData = new FormData();
+                    spiceData.append('action', 'save_recipe_spices');
+                    spiceData.append('recipe_id', savedId);
+                    spiceData.append('spice_ids', JSON.stringify(checked));
+                    fetch('../core/api.php', { method: 'POST', body: spiceData }).then(() => location.reload());
                 });
+        }
+
+        // ── Spice section ─────────────────────────────────────────────────────
+        let allSpicesCache = null;
+
+        function loadSpiceCheckboxes(recipeId) {
+            const renderFn = (selectedIds) => {
+                const grid = document.getElementById('spiceCheckGrid');
+                if (!allSpicesCache || !allSpicesCache.length) {
+                    grid.innerHTML = '<span class="text-muted small">No spices in rack yet.</span>';
+                    updateSpiceCount([]);
+                    return;
+                }
+                grid.innerHTML = allSpicesCache.map(s => `
+                    <label class="d-flex align-items-center gap-1 px-2 py-1 rounded spice-pill-label"
+                           style="background:#1e1e1e; border:1px solid #333; cursor:pointer; font-size:0.78rem; white-space:nowrap;"
+                           onmouseenter="this.style.borderColor='#555'" onmouseleave="this.style.borderColor='#333'">
+                        <input type="checkbox" class="spice-check" value="${s.id}" ${selectedIds.includes(s.id) ? 'checked' : ''}
+                               onchange="updateSpiceCount([...document.querySelectorAll('.spice-check:checked')].map(c=>parseInt(c.value)))">
+                        <span style="${s.is_stocked == 0 ? 'color:#666;' : ''}">${escHtml(s.name)}</span>
+                    </label>
+                `).join('');
+                updateSpiceCount(selectedIds);
+            };
+
+            const fetchSpices = (cb) => {
+                if (allSpicesCache !== null) { cb(); return; }
+                const d = new FormData(); d.append('action', 'get_spices');
+                fetch('../core/api.php', { method: 'POST', body: d })
+                    .then(r => r.json())
+                    .then(res => { allSpicesCache = res.spices || []; cb(); });
+            };
+
+            if (recipeId) {
+                const d = new FormData(); d.append('action', 'get_recipe_spices'); d.append('recipe_id', recipeId);
+                fetch('../core/api.php', { method: 'POST', body: d })
+                    .then(r => r.json())
+                    .then(res => {
+                        const sel = (res.spice_ids || []).map(Number);
+                        fetchSpices(() => renderFn(sel));
+                    });
+            } else {
+                fetchSpices(() => renderFn([]));
+            }
+        }
+
+        function updateSpiceCount(selectedIds) {
+            const badge = document.getElementById('spiceSelCount');
+            badge.textContent = selectedIds.length > 0 ? selectedIds.length : '';
+            badge.style.display = selectedIds.length > 0 ? '' : 'none';
         }
 
         function deleteRecipe(id) {
@@ -389,5 +597,4 @@ sort($all_tags);
                 });
         }
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

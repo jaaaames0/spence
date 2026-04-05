@@ -2,6 +2,7 @@
 /**
  * SPENCE Inventory Dashboard (Phase 4.7: Proactive Merging & UX Logic)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -12,17 +13,7 @@ if (!in_array($sort, $allowedSorts)) $sort = 'name';
 $order = ($order === 'ASC') ? 'ASC' : 'DESC';
 
 if ($sort === 'category') {
-    $categoryOrder = "CASE p.category 
-        WHEN 'Meal Prep' THEN 1 
-        WHEN 'Proteins' THEN 2 
-        WHEN 'Dairy' THEN 3 
-        WHEN 'Bread' THEN 4 
-        WHEN 'Fruit and Veg' THEN 5 
-        WHEN 'Cereal/Grains' THEN 6 
-        WHEN 'Snacks/Confectionary' THEN 7 
-        WHEN 'Drinks' THEN 8 
-        ELSE 9 END";
-    $orderBy = "$categoryOrder $order, LOWER(p.name) ASC";
+    $orderBy = getCategoryOrderSQL() . " $order, LOWER(p.name) ASC";
 } else {
     $orderBy = ($sort === 'name' ? "LOWER(p.name)" : $sort) . " $order";
     if ($sort !== 'name') $orderBy .= ", LOWER(p.name) ASC";
@@ -51,48 +42,18 @@ function sortUrl($col, $currentSort, $currentOrder) {
     $newOrder = ($currentSort === $col && $currentOrder === 'ASC') ? 'DESC' : 'ASC';
     return "?sort=$col&order=$newOrder";
 }
+$page_title   = 'Stock';
+$page_context = 'stock';
+$extra_styles = '<style>
+    .edit-input { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; font-size: 0.85rem; padding: 1px 4px; width: 100%; border-radius: 4px; }
+    .editing .view-mode { display: none !important; }
+    .viewing .edit-mode { display: none !important; }
+    .btn-icon:hover .bi-arrow-counterclockwise { color: #00A3FF; }
+    th a { color: inherit; text-decoration: none; display: block; }
+    th a:hover { color: #fff; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="stock">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPENCE | Stock</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .card { background-color: #1e1e1e; border: 1px solid #333; color: #e0e0e0; }
-        .table { color: #e0e0e0; vertical-align: middle; border-color: #333; }
-        .table-dark { --bs-table-bg: #1e1e1e; --bs-table-border-color: #333; }
-        .badge-kj { background-color: #ff9800; color: #000; font-weight: bold; }
-        .badge-protein { background-color: #2196f3; color: #fff; font-weight: bold; }
-        .badge-fat { background-color: #f44336; color: #fff; font-weight: bold; }
-        .badge-carb { background-color: #9c27b0; color: #fff; font-weight: bold; }
-        .badge-efficiency { background-color: #4caf50; color: #000; font-weight: bold; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .text-accent { color: #00A3FF !important; }
-        .btn-icon { background: none; border: none; color: #888; padding: 0 5px; cursor: pointer; transition: color 0.2s; }
-        .btn-icon:hover .bi-pencil, .btn-icon:hover .bi-check-lg { color: #ffc107; }
-        .btn-icon:hover .bi-trash, .btn-icon:hover .bi-x-lg { color: #ff4444; }
-        .edit-input { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; font-size: 0.85rem; padding: 1px 4px; width: 100%; border-radius: 4px; }
-        .editing .view-mode { display: none !important; }
-        .viewing .edit-mode { display: none !important; }
-        .modal-content { background: #1e1e1e; border: 1px solid #444; color: #e0e0e0; }
-        .form-control, .form-select { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
-        .form-control::placeholder { color: #888 !important; opacity: 1; }
-        .col-hidden { display: none !important; }
-        .merge-item { transition: background 0.2s; }
-        .merge-item:hover { background-color: #252525 !important; }
-        .flip-arrow { cursor: pointer; padding: 5px; border-radius: 4px; transition: background 0.2s; }
-        .flip-arrow:hover { background: #444; color: #fff !important; }
-        .merge-conflict { opacity: 0.3 !important; pointer-events: none; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div id="statusAlert" class="alert alert-info d-none mb-4 fw-bold uppercase" style="background: #00A3FF; color: #000; border: none; border-radius: 0;"></div>
         
@@ -105,12 +66,16 @@ function sortUrl($col, $currentSort, $currentOrder) {
                 </div>
             </div>
             <div class="col-md-5 text-end d-flex justify-content-end gap-2">
-                <form action="../core/upload.php" method="POST" enctype="multipart/form-data" class="d-inline-block">
-                    <input type="file" name="receipt" id="receiptInput" hidden onchange="this.form.submit()">
-                    <button type="button" class="btn btn-primary fw-bold" onclick="document.getElementById('receiptInput').click()" style="height: 38px;">SCAN RECEIPT</button>
+                <form enctype="multipart/form-data" onsubmit="return false;" style="display:none;">
+                    <input type="file" id="receiptInput" accept="image/*;capture=camera" onchange="receiptScan(this)">
                 </form>
+                <button type="button" class="btn btn-primary fw-bold" id="scanBtn" onclick="document.getElementById('receiptInput').click()" style="height: 38px;">SCAN RECEIPT</button>
                 <button type="button" class="btn btn-outline-secondary fw-bold px-3" onclick="openAddModal()" style="height: 38px;" title="Manual Intake">+</button>
-                <button type="button" class="btn btn-outline-secondary fw-bold px-3" data-bs-toggle="modal" data-bs-target="#configModal" style="height: 38px;" title="Table Settings">
+                <button type="button" class="btn btn-outline-secondary fw-bold px-3" id="spiceBtn" style="height: 38px; position:relative;" title="Spice Rack" onclick="openSpiceModal()">
+                    <i class="bi bi-fire"></i>
+                    <span id="spiceBtnBadge" class="d-none" style="position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#ff9800;"></span>
+                </button>
+                <button type="button" class="btn btn-outline-secondary fw-bold px-3 d-none d-md-inline-block" data-bs-toggle="modal" data-bs-target="#configModal" style="height: 38px;" title="Table Settings">
                     <i class="bi bi-sliders2"></i>
                 </button>
             </div>
@@ -123,22 +88,24 @@ function sortUrl($col, $currentSort, $currentOrder) {
                     <th style="width: 120px;"><a href="<?= sortUrl('current_qty', $sort, $order) ?>" class="<?= $sort==='current_qty'?'text-accent fw-black':'text-white' ?>">STOCK <?= $sort==='current_qty'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="col-price" style="width: 110px;"><a href="<?= sortUrl('price_paid', $sort, $order) ?>" class="<?= $sort==='price_paid'?'text-accent fw-black':'text-white' ?>">PRICE <?= $sort==='price_paid'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="col-unit-price" style="width: 110px;"><a href="<?= sortUrl('price_per_unit', $sort, $order) ?>" class="<?= $sort==='price_per_unit'?'text-accent fw-black':'text-white' ?>">$/UNIT <?= $sort==='price_per_unit'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-kj text-center" style="width: 80px;"><a href="<?= sortUrl('kj_per_100', $sort, $order) ?>" class="<?= $sort==='kj_per_100'?'text-accent fw-black':'text-white' ?>">kJ/100g <?= $sort==='kj_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-kj-per-dollar text-center" style="width: 80px;"><a href="<?= sortUrl('kj_per_dollar', $sort, $order) ?>" class="<?= $sort==='kj_per_dollar'?'text-accent fw-black':'text-white' ?>">kJ/$ <?= $sort==='kj_per_dollar'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-protein text-center" style="width: 80px;"><a href="<?= sortUrl('protein_per_100', $sort, $order) ?>" class="<?= $sort==='protein_per_100'?'text-accent fw-black':'text-white' ?>">P/100g <?= $sort==='protein_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-protein-per-dollar text-center" style="width: 80px;"><a href="<?= sortUrl('protein_per_dollar', $sort, $order) ?>" class="<?= $sort==='protein_per_dollar'?'text-accent fw-black':'text-white' ?>">P/$ <?= $sort==='protein_per_dollar'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-fat text-center" style="width: 80px;"><a href="<?= sortUrl('fat_per_100', $sort, $order) ?>" class="<?= $sort==='fat_per_100'?'text-accent fw-black':'text-white' ?>">F/100g <?= $sort==='fat_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-carbs text-center" style="width: 80px;"><a href="<?= sortUrl('carb_per_100', $sort, $order) ?>" class="<?= $sort==='carb_per_100'?'text-accent fw-black':'text-white' ?>">C/100g <?= $sort==='carb_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-location" style="width: 120px;"><a href="<?= sortUrl('location', $sort, $order) ?>" class="<?= $sort==='location'?'text-accent fw-black':'text-white' ?>">LOCATION <?= $sort==='location'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="col-category" style="width: 120px;"><a href="<?= sortUrl('category', $sort, $order) ?>" class="<?= $sort==='category'?'text-accent fw-black':'text-white' ?>">CATEGORY <?= $sort==='category'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-kj d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('kj_per_100', $sort, $order) ?>" class="<?= $sort==='kj_per_100'?'text-accent fw-black':'text-white' ?>">kJ/100g <?= $sort==='kj_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-kj-per-dollar d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('kj_per_dollar', $sort, $order) ?>" class="<?= $sort==='kj_per_dollar'?'text-accent fw-black':'text-white' ?>">kJ/$ <?= $sort==='kj_per_dollar'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-protein d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('protein_per_100', $sort, $order) ?>" class="<?= $sort==='protein_per_100'?'text-accent fw-black':'text-white' ?>">P/100g <?= $sort==='protein_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-protein-per-dollar d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('protein_per_dollar', $sort, $order) ?>" class="<?= $sort==='protein_per_dollar'?'text-accent fw-black':'text-white' ?>">P/$ <?= $sort==='protein_per_dollar'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-fat d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('fat_per_100', $sort, $order) ?>" class="<?= $sort==='fat_per_100'?'text-accent fw-black':'text-white' ?>">F/100g <?= $sort==='fat_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-carbs d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('carb_per_100', $sort, $order) ?>" class="<?= $sort==='carb_per_100'?'text-accent fw-black':'text-white' ?>">C/100g <?= $sort==='carb_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-location d-none d-md-table-cell" style="width: 120px;"><a href="<?= sortUrl('location', $sort, $order) ?>" class="<?= $sort==='location'?'text-accent fw-black':'text-white' ?>">LOCATION <?= $sort==='location'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-category d-none d-md-table-cell" style="width: 120px;"><a href="<?= sortUrl('category', $sort, $order) ?>" class="<?= $sort==='category'?'text-accent fw-black':'text-white' ?>">CATEGORY <?= $sort==='category'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="text-end text-muted" style="width: 100px;">ACTIONS</th>
                 </tr></thead>
                 <tbody><?php foreach ($items as $item): ?>
                     <tr id="row-<?= $item['id'] ?>" class="viewing">
-                        <td><strong><?= htmlspecialchars($item['name']) ?><?= $item['recipe_active'] === 0 ? '*' : '' ?></strong></td>
+                        <td>
+                            <button class="btn-icon d-inline d-md-none" style="padding:0 4px 0 0; vertical-align:middle;" onclick="toggleMobStockRow(<?= $item['id'] ?>); event.stopPropagation();"><i class="bi bi-chevron-down" id="mob-chev-<?= $item['id'] ?>"></i></button><strong><?= htmlspecialchars($item['name']) ?><?= $item['recipe_active'] === 0 ? '*' : '' ?></strong>
+                        </td>
                         <td>
                             <div class="view-mode">
-                                <?php 
+                                <?php
                                     $qty = (float)$item['current_qty'];
                                     echo ($item['base_unit'] === 'ea' && floor($qty) == $qty) ? number_format($qty, 0) : number_format($qty, 3);
                                 ?> <small class="text-muted"><?= htmlspecialchars($item['base_unit']) ?></small>
@@ -152,13 +119,13 @@ function sortUrl($col, $currentSort, $currentOrder) {
                             <div class="edit-mode"><input type="number" step="0.01" class="edit-input edit-price" value="<?= $item['price_paid'] ?>" onkeydown="handleKey(event, <?= $item['id'] ?>)"></div>
                         </td>
                         <td class="col-unit-price text-muted small">$<?= number_format((float)$item['price_per_unit'], 2) ?>/<?= htmlspecialchars($item['base_unit']) ?></td>
-                        <td class="col-kj text-center"><span class="badge badge-kj"><?= round($item['kj_per_100']) ?></span></td>
-                        <td class="col-kj-per-dollar text-center"><span class="badge badge-efficiency"><?= round($item['kj_per_dollar']) ?></span></td>
-                        <td class="col-protein text-center"><span class="badge badge-protein"><?= number_format($item['protein_per_100'], 1) ?>g</span></td>
-                        <td class="col-protein-per-dollar text-center"><span class="badge badge-efficiency"><?= round($item['protein_per_dollar']) ?></span></td>
-                        <td class="col-fat text-center"><span class="badge badge-fat"><?= number_format($item['fat_per_100'], 1) ?>g</span></td>
-                        <td class="col-carbs text-center"><span class="badge badge-carb"><?= number_format($item['carb_per_100'], 1) ?>g</span></td>
-                        <td class="col-location">
+                        <td class="col-kj d-none d-md-table-cell text-center"><span class="badge badge-kj"><?= round($item['kj_per_100']) ?></span></td>
+                        <td class="col-kj-per-dollar d-none d-md-table-cell text-center"><span class="badge badge-efficiency"><?= round($item['kj_per_dollar']) ?></span></td>
+                        <td class="col-protein d-none d-md-table-cell text-center"><span class="badge badge-protein"><?= number_format($item['protein_per_100'], 1) ?>g</span></td>
+                        <td class="col-protein-per-dollar d-none d-md-table-cell text-center"><span class="badge badge-efficiency"><?= round($item['protein_per_dollar']) ?></span></td>
+                        <td class="col-fat d-none d-md-table-cell text-center"><span class="badge badge-fat"><?= number_format($item['fat_per_100'], 1) ?>g</span></td>
+                        <td class="col-carbs d-none d-md-table-cell text-center"><span class="badge badge-carb"><?= number_format($item['carb_per_100'], 1) ?>g</span></td>
+                        <td class="col-location d-none d-md-table-cell">
                             <div class="view-mode uppercase small"><?= htmlspecialchars($item['location']) ?></div>
                             <div class="edit-mode"><select class="edit-input edit-location" onkeydown="handleKey(event, <?= $item['id'] ?>)">
                                 <option value="Pantry" <?= $item['location'] == 'Pantry' ? 'selected' : '' ?>>Pantry</option>
@@ -166,7 +133,7 @@ function sortUrl($col, $currentSort, $currentOrder) {
                                 <option value="Freezer" <?= $item['location'] == 'Freezer' ? 'selected' : '' ?>>Freezer</option>
                             </select></div>
                         </td>
-                        <td class="col-category small uppercase text-muted"><?= htmlspecialchars($item['category']) ?></td>
+                        <td class="col-category d-none d-md-table-cell small uppercase text-muted"><?= htmlspecialchars($item['category']) ?></td>
                         <td class="text-end">
                             <div class="view-mode">
                                 <button class="btn-icon" onclick="editRow(<?= $item['id'] ?>)"><i class="bi bi-pencil"></i></button>
@@ -175,6 +142,17 @@ function sortUrl($col, $currentSort, $currentOrder) {
                             <div class="edit-mode">
                                 <button class="btn-icon text-success" onclick="saveRow(<?= $item['id'] ?>)"><i class="bi bi-check-lg"></i></button>
                                 <button class="btn-icon text-danger" onclick="cancelEdit(<?= $item['id'] ?>)"><i class="bi bi-x-lg"></i></button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr class="mob-detail-row" id="mob-detail-<?= $item['id'] ?>" style="display:none;">
+                        <td colspan="5" class="px-3 pb-2 pt-1" style="background:#151515; border-top: none;">
+                            <div class="d-flex flex-wrap align-items-center gap-2" style="font-size:0.72rem;">
+                                <span class="badge badge-kj"><?= round($item['kj_per_100']) ?> kJ/100g</span>
+                                <span class="badge badge-protein"><?= number_format($item['protein_per_100'], 1) ?>g P/100g</span>
+                                <span class="badge badge-fat"><?= number_format($item['fat_per_100'], 1) ?>g F/100g</span>
+                                <span class="badge badge-carb"><?= number_format($item['carb_per_100'], 1) ?>g C/100g</span>
+                                <span class="text-muted uppercase" style="font-size:0.65rem;"><?= htmlspecialchars($item['category']) ?></span>
                             </div>
                         </td>
                     </tr>
@@ -210,7 +188,7 @@ function sortUrl($col, $currentSort, $currentOrder) {
                         <div class="form-check"><input class="form-check-input col-toggle" type="checkbox" value="col-category" id="chk-category" checked><label class="form-check-label small uppercase" for="chk-category">Category</label></div>
                     </div>
                 </div>
-                <div class="modal-footer border-0"><button type="button" class="btn btn-primary btn-sm w-100 fw-bold uppercase" data-bs-dismiss="modal">Apply</button></div>
+                <div class="modal-footer border-0"><button type="button" class="btn btn-primary btn-sm w-100 fw-bold uppercase" data-bs-dismiss="modal" onclick="applyColumnSettings()">Apply</button></div>
             </div>
         </div>
     </div>
@@ -285,8 +263,39 @@ function sortUrl($col, $currentSort, $currentOrder) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- ── Spice Rack Modal ───────────────────────────────────────────────── -->
+    <div class="modal fade" id="spiceModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content border-secondary" style="background:#1e1e1e; color:#e0e0e0;">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title fw-black uppercase">
+                        Spice Rack
+                        <span id="spiceFlagBadge" class="badge ms-2 d-none" style="background:#ff9800; color:#000; font-size:0.65rem; vertical-align:middle;">RESTOCK NEEDED</span>
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="spiceGrid" class="d-flex flex-wrap gap-2 mb-4"></div>
+                    <div class="d-flex gap-2" style="max-width: 320px;">
+                        <input type="text" id="spiceInput" class="form-control form-control-sm" placeholder="Add a custom spice or herb..." onkeydown="if(event.key==='Enter') addSpice()">
+                        <button class="btn btn-sm btn-outline-secondary fw-bold uppercase" onclick="addSpice()">Add</button>
+                    </div>
+                    <p class="text-muted small mt-2 mb-0">Toggle to mark as stocked or depleted. Restocking resets the use counter.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        function toggleMobStockRow(id) {
+            const row = document.getElementById('mob-detail-' + id);
+            const chev = document.getElementById('mob-chev-' + id);
+            if (!row) return;
+            const visible = row.style.display === 'table-row';
+            row.style.display = visible ? 'none' : 'table-row';
+            chev.className = visible ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
+        }
+
         const addInvModal = new bootstrap.Modal(document.getElementById('addInventoryModal'));
         const mergeModal = new bootstrap.Modal(document.getElementById('mergeModal'));
         const masterProducts = <?= json_encode($all_products) ?>;
@@ -393,52 +402,68 @@ function sortUrl($col, $currentSort, $currentOrder) {
                 data.append('action', 'merge');
                 data.append('source_id', match.flipped ? match.target_id : match.source_id);
                 data.append('target_id', match.flipped ? match.source_id : match.target_id);
-                await fetch('../settings/dedupe.php', { method: 'POST', body: data });
+                await fetch('../core/api.php', { method: 'POST', body: data });
             }
             location.href = 'index.php';
         }
 
-        const activeJobId = new URLSearchParams(window.location.search).get('active_job');
-        if (activeJobId) {
-            let fakeStep = 0;
-            const fakeMessages = [
-                { msg: 'Uploading High-Resolution Scan...', time: 4000 },
-                { msg: 'Optimizing for Consumption-Aware Vision...', time: 6000 },
-                { msg: 'Extracting Semantic Data...', time: 8000 }
-            ];
-            const alert = document.getElementById('statusAlert');
-            alert.classList.remove('d-none');
-            function runFakeUx() {
-                if (fakeStep < fakeMessages.length) {
-                    alert.innerHTML = '<i class="bi bi-gear spin me-2"></i>' + fakeMessages[fakeStep].msg;
-                    setTimeout(() => { fakeStep++; runFakeUx(); }, fakeMessages[fakeStep].time);
-                }
-            }
-            runFakeUx();
-            const poll = setInterval(() => {
-                fetch('../core/api.php', { method: 'POST', body: new URLSearchParams({action: 'check_job', job_id: activeJobId}) })
-                .then(r => r.json()).then(res => {
-                    if (res.status === 'processed' || res.status === 'failed') {
-                        clearInterval(poll);
-                        fakeStep = 99;
-                        let icon = res.status === 'processed' ? '<i class="bi bi-check-circle me-2"></i>' : '<i class="bi bi-exclamation-triangle me-2"></i>';
-                        alert.innerHTML = icon + (res.message || 'Complete.');
-                        if (res.status === 'processed') {
-                            setTimeout(() => {
-                                try {
-                                    const resultData = JSON.parse(res.result_json);
-                                    if (resultData.potential_merges && resultData.potential_merges.length > 0) {
-                                        showMergeSuggestions(resultData.potential_merges);
-                                    } else { location.href='index.php'; }
-                                } catch (e) { location.href='index.php'; }
-                            }, 2000);
-                        }
-                    } else if (fakeStep >= fakeMessages.length) {
-                        alert.innerHTML = '<i class="bi bi-gear spin me-2"></i>' + (res.message || 'Analyzing...');
+        // ── Synchronous receipt scan (JPEG/PNG) ──────────────────────────────
+        const scanMessages = [
+            'Uploading High-Resolution Scan...',
+            'Analyzing with Vision AI...',
+            'Extracting Line Items...',
+            'Mapping to Inventory...',
+            'Almost there...',
+        ];
+
+        function receiptScan(input) {
+            const file = input.files[0];
+            if (!file) return;
+            input.value = ''; // Allow re-selecting the same file
+
+            const statusAlert = document.getElementById('statusAlert');
+            statusAlert.classList.remove('d-none');
+            document.getElementById('scanBtn').disabled = true;
+
+            let msgIdx = 0;
+            statusAlert.innerHTML = '<i class="bi bi-gear spin me-2"></i>' + scanMessages[0];
+            const msgTimer = setInterval(() => {
+                msgIdx = Math.min(msgIdx + 1, scanMessages.length - 1);
+                statusAlert.innerHTML = '<i class="bi bi-gear spin me-2"></i>' + scanMessages[msgIdx];
+            }, 5000);
+
+            const data = new FormData();
+            data.append('action', 'scan_receipt');
+            data.append('receipt', file);
+
+            fetch('../core/receipt_api.php', { method: 'POST', body: data })
+                .then(r => r.json())
+                .then(res => {
+                    clearInterval(msgTimer);
+                    document.getElementById('scanBtn').disabled = false;
+
+                    if (res.status !== 'success') {
+                        statusAlert.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>' + (res.message || 'Scan failed.');
+                        return;
                     }
+
+                    statusAlert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + res.item_count + ' items ingested.';
+
+                    setTimeout(() => {
+                        if (res.potential_merges && res.potential_merges.length > 0) {
+                            showMergeSuggestions(res.potential_merges);
+                        } else {
+                            location.href = 'index.php';
+                        }
+                    }, 1200);
+                })
+                .catch(err => {
+                    clearInterval(msgTimer);
+                    document.getElementById('scanBtn').disabled = false;
+                    statusAlert.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Request failed — check connection and try again.';
                 });
-            }, 2000);
         }
+
 
         function editRow(id) { document.getElementById('row-'+id).classList.replace('viewing', 'editing'); }
         function cancelEdit(id) { document.getElementById('row-'+id).classList.replace('editing', 'viewing'); }
@@ -455,31 +480,29 @@ function sortUrl($col, $currentSort, $currentOrder) {
         function deleteRow(id) { fetch('../core/api.php', { method: 'POST', body: new URLSearchParams({action: 'delete', id: id}) }).then(r => r.json()).then(res => { if(res.status==='success') document.getElementById('row-'+id).remove(); }); }
         
         const STORAGE_KEY = 'spence_stock_columns';
-        function loadColumnPrefs() {
-            const prefs = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-            document.querySelectorAll('.col-toggle').forEach(chk => {
-                const colClass = chk.value;
-                const isVisible = prefs[colClass] !== false; 
-                chk.checked = isVisible;
-                updateColVisibility(colClass, isVisible);
-            });
-        }
         function updateColVisibility(colClass, isVisible) {
             document.querySelectorAll('.' + colClass).forEach(el => {
                 if (isVisible) el.classList.remove('col-hidden'); else el.classList.add('col-hidden');
             });
         }
-        document.querySelectorAll('.col-toggle').forEach(chk => {
-            chk.addEventListener('change', (e) => {
-                const colClass = e.target.value;
-                const isVisible = e.target.checked;
+        function loadColumnPrefs() {
+            const prefs = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+            document.querySelectorAll('.col-toggle').forEach(chk => {
+                const colClass = chk.value;
+                const isVisible = prefs[colClass] !== false;
+                chk.checked = isVisible;
                 updateColVisibility(colClass, isVisible);
-                const prefs = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-                prefs[colClass] = isVisible;
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
             });
-        });
-        window.addEventListener('DOMContentLoaded', loadColumnPrefs);
+        }
+        function applyColumnSettings() {
+            const prefs = {};
+            document.querySelectorAll('.col-toggle').forEach(chk => {
+                prefs[chk.value] = chk.checked;
+                updateColVisibility(chk.value, chk.checked);
+            });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+        }
+        loadColumnPrefs();
         function openAddModal() { addInvModal.show(); }
         function updateManualId(input) {
             const product = masterProducts.find(p => p.name === input.value);
@@ -499,6 +522,114 @@ function sortUrl($col, $currentSort, $currentOrder) {
                 if(res.status === 'success') location.reload(); else alert('Error: ' + res.message);
             });
         }
+
+        // ── Spice Rack ────────────────────────────────────────────────────────
+        let spiceData = [];
+        const spiceModal = new bootstrap.Modal(document.getElementById('spiceModal'));
+
+        function openSpiceModal() {
+            if (spiceData.length === 0) {
+                loadSpices(() => spiceModal.show());
+            } else {
+                renderSpices();
+                spiceModal.show();
+            }
+        }
+
+        function loadSpices(cb) {
+            const data = new FormData();
+            data.append('action', 'get_spices');
+            fetch('../core/api.php', { method: 'POST', body: data })
+                .then(r => r.json())
+                .then(res => {
+                    spiceData = res.spices || [];
+                    renderSpices();
+                    if (cb) cb();
+                });
+        }
+
+        // Check for flagged spices on page load to show toolbar badge
+        loadSpices(null);
+
+        function renderSpices() {
+            const grid = document.getElementById('spiceGrid');
+            const anyFlagged = spiceData.some(s => s.restock_flagged == 1);
+            document.getElementById('spiceFlagBadge').classList.toggle('d-none', !anyFlagged);
+            document.getElementById('spiceBtnBadge').classList.toggle('d-none', !anyFlagged);
+
+            if (!spiceData.length) {
+                grid.innerHTML = '<span class="text-muted small">No spices yet.</span>';
+                return;
+            }
+
+            grid.innerHTML = spiceData.map(s => `
+                <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
+                       style="background:#1a1a1a; border:1px solid #2a2a2a; cursor:pointer; min-width:130px;"
+                       onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2a2a2a'">
+                    <div class="form-check form-switch mb-0 flex-shrink-0">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="spice-${s.id}" ${s.is_stocked == 1 ? 'checked' : ''}
+                               onchange="toggleSpice(${s.id}, this.checked)"
+                               style="cursor:pointer;" onclick="event.stopPropagation()">
+                    </div>
+                    <span class="flex-grow-1 text-truncate" style="font-size:0.82rem; ${s.is_stocked == 1 ? 'color:#e0e0e0' : 'color:#555; text-decoration:line-through'};">${escHtml(s.name)}</span>
+                    ${s.restock_flagged == 1 ? `<i class="bi bi-exclamation-triangle-fill flex-shrink-0" style="color:#ff9800; font-size:0.75rem;" title="Used ${s.uses_since_restock} times since last restock"></i>` : ''}
+                    <button class="flex-shrink-0" style="color:#444;background:none;border:none;padding:0;font-size:0.7rem;line-height:1;" title="Remove"
+                            onclick="event.preventDefault(); event.stopPropagation(); deleteSpice(${s.id})"
+                            onmouseenter="this.style.color='#f44336'" onmouseleave="this.style.color='#444'">✕</button>
+                </label>
+            `).join('');
+        }
+
+        function toggleSpice(id, isStocked) {
+            const data = new FormData();
+            data.append('action', 'toggle_spice');
+            data.append('spice_id', id);
+            data.append('is_stocked', isStocked ? 1 : 0);
+            fetch('../core/api.php', { method: 'POST', body: data })
+                .then(() => {
+                    const s = spiceData.find(x => x.id == id);
+                    if (s) {
+                        s.is_stocked = isStocked ? 1 : 0;
+                        if (isStocked) { s.uses_since_restock = 0; s.restock_flagged = 0; }
+                    }
+                    renderSpices();
+                });
+        }
+
+        function addSpice() {
+            const input = document.getElementById('spiceInput');
+            const name = input.value.trim();
+            if (!name) return;
+            const data = new FormData();
+            data.append('action', 'add_spice');
+            data.append('name', name);
+            fetch('../core/api.php', { method: 'POST', body: data })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.status === 'success') {
+                        input.value = '';
+                        // Avoid duplicates if already in list
+                        if (!spiceData.find(s => s.id == res.spice.id)) spiceData.push(res.spice);
+                        spiceData.sort((a, b) => a.name.localeCompare(b.name));
+                        renderSpices();
+                    }
+                });
+        }
+
+        function deleteSpice(id) {
+            const data = new FormData();
+            data.append('action', 'delete_spice');
+            data.append('id', id);
+            fetch('../core/api.php', { method: 'POST', body: data })
+                .then(() => {
+                    spiceData = spiceData.filter(s => s.id != id);
+                    renderSpices();
+                });
+        }
+
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

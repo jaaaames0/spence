@@ -2,6 +2,7 @@
 /**
  * SPENCE | User Profile & Goals (Phase 10.2: Final Polish)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -26,44 +27,25 @@ if ($has_profile) {
         $tdee_kj = ($bmr * $user['activity_rate']) * 4.184;
     }
 }
+$page_title   = 'User Profile';
+$page_context = 'settings';
+$extra_styles = '<style>
+    .card { background-color: #1a1a1a; border: 1px solid #333; border-radius: 12px; color: #ffffff; }
+    h4 { color: #ffffff !important; }
+    .form-control, .form-select { background: #2b2b2b !important; border: 1px solid #444 !important; color: #fff !important; }
+    .form-control:focus, .form-select:focus { border-color: #6c757d !important; box-shadow: 0 0 0 0.25rem rgba(108, 117, 125, 0.25) !important; }
+    .btn-outline-secondary { border-color: #6c757d; color: #6c757d; font-weight: 700; }
+    .btn-outline-secondary:hover { background: #6c757d; color: #000; }
+    .btn-primary { background-color: #6c757d; border-color: #6c757d; color: #fff; }
+    .btn-primary:hover { background-color: #5a6268; border-color: #545b62; }
+    input[type="range"] { accent-color: #6c757d; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="settings">
-<head>
-    <meta charset="UTF-8">
-    <title>SPENCE | User Profile</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .card { background-color: #1a1a1a; border: 1px solid #333; border-radius: 12px; color: #ffffff; }
-        h4 { color: #ffffff !important; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .text-accent { color: #6c757d !important; }
-        .nav-tabs { border-bottom: 2px solid #333; }
-        .nav-tabs .nav-link { color: #888; border: none; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; }
-        .nav-tabs .nav-link.active { background: none; color: #6c757d !important; border-bottom: 3px solid #6c757d; }
-        .stat-label { font-size: 0.7rem; font-weight: 900; color: #666; letter-spacing: 1px; margin-bottom: 2px; }
-        .stat-value { font-size: 1.5rem; font-weight: 900; color: #fff; line-height: 1; }
-        .color-p { color: #2196f3 !important; } .color-f { color: #f44336 !important; } .color-c { color: #9c27b0 !important; }
-        .form-control, .form-select { background: #2b2b2b !important; border: 1px solid #444 !important; color: #fff !important; }
-        .form-control:focus, .form-select:focus { border-color: #6c757d !important; box-shadow: 0 0 0 0.25rem rgba(108, 117, 125, 0.25) !important; }
-        .modal-content { background: #1a1a1a; border: 1px solid #444; color: #e0e0e0; }
-        .btn-outline-secondary { border-color: #6c757d; color: #6c757d; font-weight: 700; }
-        .btn-outline-secondary:hover { background: #6c757d; color: #000; }
-        .btn-primary { background-color: #6c757d; border-color: #6c757d; color: #fff; }
-        .btn-primary:hover { background-color: #5a6268; border-color: #545b62; }
-        input[type="range"] { accent-color: #6c757d; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
             <div class="col-md-3"><h2 class="fw-black uppercase mb-0">Settings</h2></div>
-            <div class="col-md-4">
+            <div class="d-none d-md-block col-md-4">
                 <div class="input-group" style="max-width: 400px; visibility: hidden;">
                     <input type="text" class="form-control">
                     <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-search"></i></span>
@@ -140,25 +122,25 @@ if ($has_profile) {
                         </div>
 
                         <div class="row g-3 mb-4">
-                            <div class="col-md-3">
+                            <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Energy</div>
                                     <div class="stat-value" style="color: #ff9800;"><?= number_format($goals['target_kj']) ?> <small class="fs-6 text-muted">kJ</small></div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Protein</div>
                                     <div class="stat-value color-p"><?= number_format($goals['target_protein_g']) ?> <small class="fs-6 text-muted">g</small></div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Fat</div>
                                     <div class="stat-value color-f"><?= number_format($goals['target_fat_g']) ?> <small class="fs-6 text-muted">g</small></div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Carbs</div>
                                     <div class="stat-value color-c"><?= number_format($goals['target_carb_g']) ?> <small class="fs-6 text-muted">g</small></div>
@@ -296,7 +278,6 @@ if ($has_profile) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const TDEE = <?= $tdee_kj ?>;
         const LBM_KG = <?= $lbm_kg ?>;
@@ -412,5 +393,4 @@ if ($has_profile) {
             fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
         }
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

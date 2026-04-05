@@ -1,5 +1,6 @@
 <?php
-require_once '../core/db_helper.php';
+require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/db_helper.php';
 
 header('Content-Type: application/json');
 

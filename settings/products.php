@@ -2,29 +2,9 @@
 /**
  * SPENCE Settings & Product Master (Phase 4.5: High-Fidelity & Dropped Products)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'update_product') {
-        $db->beginTransaction();
-        try {
-            $id = (int)$_POST['id'];
-            $stmt = $db->prepare("UPDATE products SET name = ?, category = ?, base_unit = ?, kj_per_100 = ?, protein_per_100 = ?, fat_per_100 = ?, carb_per_100 = ?, weight_per_ea = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-            $stmt->execute([$_POST['name'], $_POST['category'], $_POST['unit'], $_POST['kj'], $_POST['protein'], $_POST['fat'], $_POST['carb'], $_POST['weight'], $id]);
-            $db->commit();
-            echo json_encode(['status' => 'success']);
-            exit;
-        } catch (Exception $e) { $db->rollBack(); echo json_encode(['status' => 'error', 'message' => $e->getMessage()]); exit; }
-    } elseif ($_POST['action'] === 'create_product') {
-        try {
-            $stmt = $db->prepare("INSERT INTO products (name, category, base_unit, kj_per_100, protein_per_100, fat_per_100, carb_per_100, weight_per_ea, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'raw')");
-            $stmt->execute([$_POST['name'], $_POST['category'], $_POST['unit'], $_POST['kj'], $_POST['protein'], $_POST['fat'], $_POST['carb'], $_POST['weight']]);
-            echo json_encode(['status' => 'success']);
-            exit;
-        } catch (Exception $e) { echo json_encode(['status' => 'error', 'message' => $e->getMessage()]); exit; }
-    }
-}
 
 // Sorting logic
 $sort = $_GET['sort'] ?? 'id';
@@ -65,42 +45,19 @@ function sortUrl($col, $currentSort, $currentOrder) {
     $newOrder = ($currentSort === $col && $currentOrder === 'ASC') ? 'DESC' : 'ASC';
     return "?sort=$col&order=$newOrder";
 }
+$page_title   = 'Product Master';
+$page_context = 'settings';
+$extra_styles = '<style>
+    .edit-input { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; font-size: 0.85rem; padding: 1px 4px; width: 100%; border-radius: 4px; }
+    .btn-icon:hover .bi-pencil, .btn-icon:hover .bi-check-lg { color: #6c757d; }
+    .btn-icon:hover .bi-arrow-counterclockwise { color: #00A3FF; }
+    .editing .view-mode  { display: none !important; }
+    .viewing .edit-mode  { display: none !important; }
+    th a { color: inherit; text-decoration: none; display: block; }
+    th a:hover { color: #fff; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="settings">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPENCE | Settings</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .card { background-color: #1e1e1e; border: 1px solid #333; color: #e0e0e0; }
-        .table { color: #e0e0e0; vertical-align: middle; border-color: #333; }
-        .table-dark { --bs-table-bg: #1e1e1e; --bs-table-border-color: #333; }
-        .edit-input { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; font-size: 0.85rem; padding: 1px 4px; width: 100%; border-radius: 4px; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .btn-icon { background: none; border: none; color: #888; padding: 0 5px; cursor: pointer; transition: color 0.2s; }
-        .btn-icon:hover .bi-pencil, .btn-icon:hover .bi-check-lg { color: #6c757d; }
-        .btn-icon:hover .bi-trash, .btn-icon:hover .bi-x-lg, .btn-icon:hover .bi-arrow-counterclockwise { color: #ff4444; }
-        .btn-icon:hover .bi-arrow-counterclockwise { color: #00A3FF; }
-        .editing .view-mode { display: none !important; }
-        .viewing .edit-mode { display: none !important; }
-        .nav-tabs { border-bottom: 2px solid #333; }
-        .nav-tabs .nav-link { color: #888; border: none; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; }
-        .nav-tabs .nav-link.active { background: none; color: #6c757d !important; border-bottom: 3px solid #6c757d; }
-        .modal-content { background: #1e1e1e; border: 1px solid #444; color: #e0e0e0; }
-        .form-control, .form-select { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
-        .form-control::placeholder { color: #888 !important; opacity: 1; }
-        th a { color: inherit; text-decoration: none; display: block; }
-        th a:hover { color: #fff; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
             <div class="col-md-3"><h2 class="fw-black uppercase mb-0">Settings</h2></div>
@@ -270,14 +227,13 @@ function sortUrl($col, $currentSort, $currentOrder) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const addModal = new bootstrap.Modal(document.getElementById('addProductModal'));
-        const dropModal = new bootstrap.Modal(document.getElementById('dropModal'));
         let activeId = null;
 
-        function openAddModal() { addModal.show(); }
-        
+        function openAddModal() {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('addProductModal')).show();
+        }
+
         function filterTable(query) {
             const rows = document.querySelectorAll('tbody tr[id^="row-"]');
             const q = query.toLowerCase();
@@ -294,7 +250,7 @@ function sortUrl($col, $currentSort, $currentOrder) {
         function openDropModal(id, name) {
             activeId = id;
             document.getElementById('dropProductName').innerText = name;
-            dropModal.show();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('dropModal')).show();
         }
 
         function executeDrop() {
@@ -308,7 +264,7 @@ function sortUrl($col, $currentSort, $currentOrder) {
             e.preventDefault();
             const data = new FormData(e.target);
             data.append('action', 'create_product');
-            fetch('products.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
                 if(res.status === 'success') location.reload();
                 else alert('Error: ' + res.message);
             });
@@ -329,11 +285,10 @@ function sortUrl($col, $currentSort, $currentOrder) {
             data.append('fat', row.querySelector('.edit-fat').value);
             data.append('carb', row.querySelector('.edit-carb').value);
             data.append('weight', row.querySelector('.edit-weight').value);
-            fetch('products.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { 
-                if(res.status === 'success') location.reload(); 
+            fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+                if(res.status === 'success') location.reload();
                 else alert('Error: ' + res.message);
             });
         }
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

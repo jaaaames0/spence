@@ -2,6 +2,7 @@
 /**
  * SPENCE Eat (Phase 11.6: Metrics & Search)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 $db = get_db_connection();
 
@@ -21,11 +22,23 @@ $sortMap = [
 $orderBy = $sortMap[$sort] . " " . $order;
 
 $query = "SELECT i.*, p.name, p.category, p.kj_per_100, p.protein_per_100, p.weight_per_ea, p.base_unit, COALESCE(r.is_active, 1) as recipe_active
-          FROM inventory i 
-          JOIN products p ON i.product_id = p.id 
+          FROM inventory i
+          JOIN products p ON i.product_id = p.id
           LEFT JOIN recipes r ON p.recipe_id = r.id
           WHERE i.current_qty > 0
           ORDER BY $orderBy";
+
+// All products for Quick Eat — Existing path (no stock requirement)
+$qe_products = $db->query("
+    SELECT p.id, p.name, p.category, p.base_unit, p.weight_per_ea,
+           p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100
+    FROM products p
+    LEFT JOIN recipes r ON p.recipe_id = r.id
+    WHERE p.merges_into IS NULL
+      AND p.is_dropped = 0
+      AND (p.type = 'raw' OR (p.type = 'cooked' AND r.is_active = 1))
+    ORDER BY LOWER(p.name) ASC
+")->fetchAll(PDO::FETCH_ASSOC);
 
 $stmt = $db->query($query);
 $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -35,7 +48,7 @@ foreach($items as $item) {
     if ($item['recipe_active'] == 0) $hasHistorical = true; 
 }
 
-$categoryOrder = ['Meal Prep', 'Proteins', 'Dairy', 'Bread', 'Fruit and Veg', 'Cereals/Grains', 'Snacks/Confectionary', 'Drinks', 'Other'];
+$categoryOrder = SPENCE_CATEGORIES;
 $groupedItems = array_fill_keys($categoryOrder, []);
 
 foreach ($items as $item) {
@@ -49,45 +62,23 @@ function sortUrl($col, $currentSort, $currentOrder) {
     $newOrder = ($currentSort === $col && $currentOrder === 'ASC') ? 'DESC' : 'ASC';
     return "?sort=$col&order=$newOrder";
 }
+$page_title   = 'Eat';
+$page_context = 'raid';
+$extra_styles = '<style>
+    .location-header { border-left: 4px solid #ff9800; padding-left: 15px; margin: 2.5rem 0 1rem 0; color: #ff9800 !important; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; font-size: 1rem; }
+    .card-eat { background-color: #1e1e1e; border: 1px solid #333; color: #e0e0e0; cursor: pointer; transition: 0.2s; border-radius: 4px; }
+    .card-eat:hover { border-color: #ff9800; background-color: #252525; }
+    .qty-large { font-size: 1.25rem; font-weight: 800; color: #fff !important; }
+    .unit-label { color: #666 !important; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; }
+    .btn-quick { background: #333; border: 1px solid #444; color: #fff !important; font-size: 0.75rem; padding: 12px 2px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; min-width: 0; flex: 1; }
+    .btn-quick:hover { background: #444; border-color: #ff9800; }
+    .btn-clear { background: #1a1a1a; border: 1px solid #444; color: #f44336 !important; font-size: 0.85rem; font-weight: 800; padding: 10px; width: 100%; }
+    .btn-clear:hover { background: #222; border-color: #f44336; }
+    .btn-raid { background: #ff9800; color: #000; font-weight: 900; border: none; padding: 12px; }
+    .btn-raid:hover { background: #e68900; color: #000; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="raid">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPENCE | Eat</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .location-header { border-left: 4px solid #ff9800; padding-left: 15px; margin: 2.5rem 0 1rem 0; color: #ff9800 !important; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; font-size: 1rem; }
-        .card-eat { background-color: #1e1e1e; border: 1px solid #333; color: #e0e0e0; cursor: pointer; transition: 0.2s; border-radius: 4px; }
-        .card-eat:hover { border-color: #ff9800; background-color: #252525; }
-        .badge-kj { background-color: #ff9800; color: #000; font-weight: bold; }
-        .badge-protein { background-color: #2196f3; color: #fff; font-weight: bold; }
-        .badge-cost { background-color: #4caf50; color: #000; font-weight: bold; }
-        .qty-large { font-size: 1.25rem; font-weight: 800; color: #fff !important; }
-        .unit-label { color: #666 !important; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .modal-content { background-color: #1e1e1e !important; border: 1px solid #444 !important; color: #e0e0e0 !important; }
-        .form-control { background-color: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; }
-        .form-control::placeholder { color: #888 !important; opacity: 1; }
-        .btn-quick { background: #333; border: 1px solid #444; color: #fff !important; font-size: 0.75rem; padding: 12px 2px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; min-width: 0; flex: 1; }
-        .btn-quick:hover { background: #444; border-color: #ff9800; }
-        .btn-clear { background: #1a1a1a; border: 1px solid #444; color: #f44336 !important; font-size: 0.85rem; font-weight: 800; padding: 10px; width: 100%; }
-        .btn-clear:hover { background: #222; border-color: #f44336; }
-        .btn-raid { background: #ff9800; color: #000; font-weight: 900; border: none; padding: 12px; }
-        .btn-raid:hover { background: #e68900; }
-        .macro-box { min-height: 85px; visibility: hidden; }
-        .macro-box.visible { visibility: visible; }
-        .uppercase { text-transform: uppercase; }
-        .fw-black { font-weight: 900; }
-        .product-name { font-size: 1.1rem; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; height: 2.4em; }
-        .historical-note { font-size: 0.65rem; letter-spacing: 0.5px; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
             <div class="col-md-3"><h2 class="fw-black uppercase mb-0">Raid Inventory</h2></div>
@@ -97,12 +88,21 @@ function sortUrl($col, $currentSort, $currentOrder) {
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                 </div>
             </div>
-            <div class="col-md-5 text-end">
+            <div class="col-md-5 text-end d-flex align-items-center justify-content-end gap-3">
                 <div class="d-inline-flex gap-3 small fw-bold text-muted uppercase" style="font-size: 0.65rem; letter-spacing: 1px;">
                     <span><span class="badge badge-kj me-1">#</span> kJ</span>
                     <span><span class="badge badge-protein me-1">#</span> Protein</span>
                     <span><span class="badge badge-cost me-1">$</span> Cost</span>
-                    <span class="text-white">(per 100g / per 100mL / each)</span>
+                    <span class="d-none d-md-inline text-white">(per 100g / per 100mL / each)</span>
+                </div>
+                <div class="dropdown">
+                    <button class="btn fw-black uppercase dropdown-toggle" type="button" data-bs-toggle="dropdown" style="background:#ff9800; color:#000; border:none; height:38px;">
+                        <i class="bi bi-lightning-fill me-1"></i>Quick Eat
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark">
+                        <li><a class="dropdown-item" href="#" onclick="document.getElementById('qeNewFoodInput').click(); return false;"><i class="bi bi-camera-fill me-2" style="color:#ff9800;"></i>New Food (Photo)</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="openQuickEatExisting(); return false;"><i class="bi bi-list-ul me-2"></i>Existing Product</a></li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -209,7 +209,6 @@ function sortUrl($col, $currentSort, $currentOrder) {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let currentItem = null;
         const modal = new bootstrap.Modal(document.getElementById('consumeModal'));
@@ -319,5 +318,393 @@ function sortUrl($col, $currentSort, $currentOrder) {
             });
         }
     </script>
-</body>
-</html>
+
+    <form enctype="multipart/form-data" onsubmit="return false;" style="display:none;">
+        <input type="file" id="qeNewFoodInput" accept="image/*;capture=camera" onchange="qeNewFoodSelected(this)">
+    </form>
+
+    <!-- ==================== QUICK EAT MODALS ==================== -->
+
+    <!-- Photo: scan + review -->
+    <div class="modal fade" id="qePhotoModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title fw-black uppercase"><i class="bi bi-camera-fill me-2" style="color:#ff9800;"></i>Quick Eat — New Food</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- State 1: Preview + scan button -->
+                    <div id="qeScanState">
+                        <div class="mb-3 text-center">
+                            <img id="qePreviewImg" src="" style="max-height:220px; max-width:100%; border-radius:4px; border:1px solid #333;">
+                        </div>
+                        <button class="btn w-100 fw-bold uppercase py-2" onclick="doScan()" style="background:#ff9800; color:#000; border:none;">
+                            <i class="bi bi-cpu me-1"></i>Analyse Food
+                        </button>
+                    </div>
+                    <!-- State 2: Scanning spinner -->
+                    <div id="qeScanningState" class="text-center py-4" style="display:none;">
+                        <div class="spinner-border" style="color:#ff9800; width:2.5rem; height:2.5rem;" role="status"></div>
+                        <div class="mt-3 text-muted fw-bold uppercase" style="font-size:0.8rem; letter-spacing:1px;">Analysing food...</div>
+                    </div>
+                    <!-- State 3: Review + edit (multi-item) -->
+                    <div id="qeReviewState" style="display:none;">
+                        <div id="qeItemList" class="mb-3"></div>
+                        <!-- Combined totals -->
+                        <div class="p-3 rounded" style="background:#0a0a0a; border:1px solid #444;">
+                            <div class="text-muted uppercase fw-bold mb-2" style="font-size:0.65rem; letter-spacing:1px;">Combined Total</div>
+                            <div class="row text-center g-0">
+                                <div class="col border-end border-secondary">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.6rem;">Energy</small>
+                                    <span id="qeTotalKj" class="fw-bold" style="color:#ff9800;">0</span> <small style="color:#ff9800;">kJ</small>
+                                </div>
+                                <div class="col border-end border-secondary">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.6rem;">Protein</small>
+                                    <span id="qeTotalP" class="fw-bold text-primary">0</span> <small class="text-primary">g</small>
+                                </div>
+                                <div class="col border-end border-secondary">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.6rem;">Fat</small>
+                                    <span id="qeTotalF" class="fw-bold" style="color:#f44336;">0</span> <small style="color:#f44336;">g</small>
+                                </div>
+                                <div class="col">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.6rem;">Carbs</small>
+                                    <span id="qeTotalC" class="fw-bold" style="color:#ab47bc;">0</span> <small style="color:#ab47bc;">g</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- State 4: Success -->
+                    <div id="qeSuccessState" class="text-center py-4" style="display:none;">
+                        <i class="bi bi-check-circle-fill" style="color:#4caf50; font-size:2.5rem;"></i>
+                        <div class="mt-2 fw-bold text-white">Logged to intake</div>
+                        <div id="qeSuccessMacros" class="mt-2 text-muted small"></div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0" id="qePhotoFooter">
+                    <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">CANCEL</button>
+                    <button type="button" class="btn fw-black uppercase" id="qeLogBtn" onclick="logPhotoEat()" style="background:#ff9800; color:#000; border:none;" disabled>LOG INTAKE</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Existing: search + log -->
+    <div class="modal fade" id="qeExistingModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title fw-black uppercase"><i class="bi bi-list-ul me-2" style="color:#ff9800;"></i>Quick Eat — Existing Product</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- State 1: Search list -->
+                    <div id="qeSearchState">
+                        <div class="input-group mb-3">
+                            <input type="text" id="qeProductSearch" class="form-control" placeholder="Search products..." oninput="filterQeProducts(this.value)" autofocus>
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        </div>
+                        <div id="qeProductList" style="max-height:320px; overflow-y:auto;"></div>
+                    </div>
+                    <!-- State 2: Amount entry -->
+                    <div id="qeAmountState" style="display:none;">
+                        <div class="d-flex align-items-center gap-2 mb-4">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="backToSearch()"><i class="bi bi-arrow-left"></i></button>
+                            <span id="qeSelectedName" class="fw-bold fs-5 text-white"></span>
+                            <span id="qeSelectedUnit" class="badge bg-secondary text-uppercase"></span>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-muted uppercase">Amount (<span id="qeAmountUnit"></span>)</label>
+                            <input type="number" step="0.001" id="qeAmount" class="form-control form-control-lg fw-bold" placeholder="0.000" oninput="updateExistingPreview()">
+                        </div>
+                        <div id="qeExistingPreview" class="p-3 rounded mb-3" style="background:#0a0a0a; border:1px solid #333; display:none;">
+                            <div class="row text-center g-0">
+                                <div class="col border-end border-secondary">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.65rem;">Energy</small>
+                                    <span id="qeExPrevKj" class="fw-bold" style="color:#ff9800;">—</span> <small style="color:#ff9800;">kJ</small>
+                                </div>
+                                <div class="col border-end border-secondary">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.65rem;">Protein</small>
+                                    <span id="qeExPrevP" class="fw-bold text-primary">—</span> <small class="text-primary">g</small>
+                                </div>
+                                <div class="col border-end border-secondary">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.65rem;">Fat</small>
+                                    <span id="qeExPrevF" class="fw-bold" style="color:#f44336;">—</span> <small style="color:#f44336;">g</small>
+                                </div>
+                                <div class="col">
+                                    <small class="d-block text-muted uppercase fw-bold" style="font-size:0.65rem;">Carbs</small>
+                                    <span id="qeExPrevC" class="fw-bold" style="color:#ab47bc;">—</span> <small style="color:#ab47bc;">g</small>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Success inline -->
+                        <div id="qeExSuccessState" class="text-center py-3" style="display:none;">
+                            <i class="bi bi-check-circle-fill" style="color:#4caf50; font-size:2rem;"></i>
+                            <div class="mt-2 fw-bold text-white">Logged to intake</div>
+                            <div id="qeExSuccessMacros" class="mt-1 text-muted small"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0" id="qeExistingFooter">
+                    <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">CLOSE</button>
+                    <button type="button" class="btn fw-black uppercase" id="qeExLogBtn" onclick="logExistingEat()" style="background:#ff9800; color:#000; border:none; display:none;">LOG INTAKE</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const qePhotoModal    = new bootstrap.Modal(document.getElementById('qePhotoModal'));
+    const qeExistingModal = new bootstrap.Modal(document.getElementById('qeExistingModal'));
+    const qeAllProducts   = <?= json_encode($qe_products) ?>;
+    let qeSelectedProduct = null;
+    let qeSelectedFile    = null;
+
+    // ---- Photo path ----
+    function qeNewFoodSelected(input) {
+        const file = input.files[0];
+        if (!file) return;
+        qeSelectedFile = file;
+        const reader = new FileReader();
+        reader.onload = e => {
+            document.getElementById('qePreviewImg').src = e.target.result;
+            resetPhotoModal();
+            qePhotoModal.show();
+        };
+        reader.readAsDataURL(file);
+        input.value = ''; // Reset so same file can be re-selected
+    }
+
+    function resetPhotoModal() {
+        document.getElementById('qeScanState').style.display = '';
+        document.getElementById('qeScanningState').style.display = 'none';
+        document.getElementById('qeReviewState').style.display = 'none';
+        document.getElementById('qeSuccessState').style.display = 'none';
+        document.getElementById('qePhotoFooter').style.display = '';
+        document.getElementById('qeLogBtn').disabled = true;
+    }
+
+    function doScan() {
+        if (!qeSelectedFile) return;
+
+        document.getElementById('qeScanState').style.display = 'none';
+        document.getElementById('qeScanningState').style.display = '';
+
+        const data = new FormData();
+        data.append('action', 'scan');
+        data.append('image', qeSelectedFile);
+
+        fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
+            .then(r => r.json())
+            .then(res => {
+                document.getElementById('qeScanningState').style.display = 'none';
+                if (res.status !== 'success') {
+                    document.getElementById('qeScanState').style.display = '';
+                    alert('Scan failed: ' + res.message);
+                    return;
+                }
+                const d = res.data;
+                renderQeItems(res.items);
+                document.getElementById('qeReviewState').style.display = '';
+                document.getElementById('qeLogBtn').disabled = false;
+            })
+            .catch(err => {
+                document.getElementById('qeScanningState').style.display = 'none';
+                document.getElementById('qeScanState').style.display = '';
+                alert('Request failed. Check your connection and try again.\n\n' + err);
+            });
+    }
+
+    function renderQeItems(items) {
+        // Normalize: model may return a single object instead of array
+        if (!Array.isArray(items)) items = items ? [items] : [];
+        items = items.filter(Boolean);
+        if (!items.length) { alert('AI could not identify any food items. Try again.'); return; }
+        const list = document.getElementById('qeItemList');
+        list.innerHTML = items.map((item, i) => `
+            <div class="mb-2 p-2" style="background:#1a1a1a; border:1px solid #333; border-radius:4px;">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <input type="checkbox" class="form-check-input qe-chk flex-shrink-0" id="qe-chk-${i}" checked onchange="updateQeTotals()">
+                    <input type="text" class="form-control form-control-sm fw-bold" id="qe-name-${i}" value="${item.name || ''}" style="flex:1;">
+                    <div class="input-group input-group-sm" style="width:100px; flex-shrink:0;">
+                        <input type="number" class="form-control form-control-sm text-end qe-weight" id="qe-weight-${i}" value="${Math.round(item.estimated_weight_g) || ''}" min="1" oninput="updateQeTotals()">
+                        <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666; font-size:0.7rem;">g</span>
+                    </div>
+                </div>
+                <div class="d-flex gap-1 align-items-center">
+                    <input type="number" class="form-control form-control-sm text-center qe-kj" id="qe-kj-${i}" value="${Math.round(item.kj_per_100) || 0}" oninput="updateQeTotals()" title="kJ/100g" style="width:60px;" placeholder="kJ">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-p" id="qe-p-${i}" value="${item.protein_per_100 || 0}" oninput="updateQeTotals()" title="Protein/100g" style="width:55px;" placeholder="P">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-f" id="qe-f-${i}" value="${item.fat_per_100 || 0}" oninput="updateQeTotals()" title="Fat/100g" style="width:55px;" placeholder="F">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-c" id="qe-c-${i}" value="${item.carbs_per_100 || 0}" oninput="updateQeTotals()" title="Carbs/100g" style="width:55px;" placeholder="C">
+                    <span class="text-muted ms-1" style="font-size:0.6rem; white-space:nowrap;">per 100g</span>
+                    <div class="form-check ms-auto mb-0 d-flex align-items-center gap-1" style="white-space:nowrap;">
+                        <input class="form-check-input mt-0 qe-master" type="checkbox" id="qe-master-${i}">
+                        <label class="form-check-label text-muted" style="font-size:0.65rem;" for="qe-master-${i}">Add to Master</label>
+                    </div>
+                    <input type="hidden" id="qe-cat-${i}" value="${item.category || 'Other'}">
+                </div>
+            </div>
+        `).join('');
+        updateQeTotals();
+    }
+
+    function updateQeTotals() {
+        let totalKj = 0, totalP = 0, totalF = 0, totalC = 0;
+        const n = document.querySelectorAll('.qe-chk').length;
+        for (let i = 0; i < n; i++) {
+            if (!document.getElementById('qe-chk-' + i)?.checked) continue;
+            const w = parseFloat(document.getElementById('qe-weight-' + i)?.value) || 0;
+            const f = w / 100;
+            totalKj += (parseFloat(document.getElementById('qe-kj-' + i)?.value) || 0) * f;
+            totalP  += (parseFloat(document.getElementById('qe-p-' + i)?.value) || 0) * f;
+            totalF  += (parseFloat(document.getElementById('qe-f-' + i)?.value) || 0) * f;
+            totalC  += (parseFloat(document.getElementById('qe-c-' + i)?.value) || 0) * f;
+        }
+        document.getElementById('qeTotalKj').innerText = Math.round(totalKj);
+        document.getElementById('qeTotalP').innerText  = totalP.toFixed(1);
+        document.getElementById('qeTotalF').innerText  = totalF.toFixed(1);
+        document.getElementById('qeTotalC').innerText  = totalC.toFixed(1);
+    }
+
+    function logPhotoEat() {
+        const n = document.querySelectorAll('.qe-chk').length;
+        const items = [];
+        for (let i = 0; i < n; i++) {
+            if (!document.getElementById('qe-chk-' + i)?.checked) continue;
+            items.push({
+                name:           document.getElementById('qe-name-' + i).value,
+                weight_g:       parseFloat(document.getElementById('qe-weight-' + i).value) || 0,
+                kj_per_100:     parseFloat(document.getElementById('qe-kj-' + i).value) || 0,
+                protein_per_100: parseFloat(document.getElementById('qe-p-' + i).value) || 0,
+                fat_per_100:    parseFloat(document.getElementById('qe-f-' + i).value) || 0,
+                carbs_per_100:  parseFloat(document.getElementById('qe-c-' + i).value) || 0,
+                category:       document.getElementById('qe-cat-' + i).value,
+                add_to_master:  document.getElementById('qe-master-' + i).checked
+            });
+        }
+        if (!items.length) { alert('No items selected.'); return; }
+
+        const data = new FormData();
+        data.append('action', 'log_photo');
+        data.append('items', JSON.stringify(items));
+
+        fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status !== 'success') { alert('Error: ' + res.message); return; }
+                document.getElementById('qeReviewState').style.display = 'none';
+                document.getElementById('qePhotoFooter').style.display = 'none';
+                const m = res.macros;
+                document.getElementById('qeSuccessMacros').innerText =
+                    `${Math.round(m.kj)} kJ · ${parseFloat(m.protein).toFixed(1)}g P · ${parseFloat(m.fat).toFixed(1)}g F · ${parseFloat(m.carb).toFixed(1)}g C`;
+                document.getElementById('qeSuccessState').style.display = '';
+            });
+    }
+
+    // ---- Existing path ----
+    function openQuickEatExisting() {
+        resetExistingModal();
+        qeExistingModal.show();
+    }
+
+    function resetExistingModal() {
+        qeSelectedProduct = null;
+        document.getElementById('qeProductSearch').value = '';
+        document.getElementById('qeSearchState').style.display = '';
+        document.getElementById('qeAmountState').style.display = 'none';
+        document.getElementById('qeExLogBtn').style.display = 'none';
+        document.getElementById('qeExSuccessState').style.display = 'none';
+        document.getElementById('qeExistingPreview').style.display = 'none';
+        filterQeProducts('');
+    }
+
+    function filterQeProducts(q) {
+        const query = q.toLowerCase();
+        const list = document.getElementById('qeProductList');
+        const filtered = query
+            ? qeAllProducts.filter(p => p.name.toLowerCase().includes(query) || p.category.toLowerCase().includes(query))
+            : qeAllProducts;
+
+        list.innerHTML = filtered.slice(0, 50).map(p => `
+            <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom border-secondary"
+                 style="cursor:pointer; transition:0.15s;"
+                 onmouseover="this.style.background='#252525'" onmouseout="this.style.background=''"
+                 onclick="selectQeProduct(${p.id})">
+                <div>
+                    <span class="fw-bold text-white">${p.name}</span>
+                    <span class="text-muted small ms-2 uppercase">${p.category}</span>
+                </div>
+                <span class="badge bg-secondary opacity-50 text-uppercase" style="font-size:0.65rem;">${p.base_unit}</span>
+            </div>
+        `).join('');
+
+        if (!filtered.length) {
+            list.innerHTML = '<div class="text-center text-muted p-3 small">No products found.</div>';
+        }
+    }
+
+    function selectQeProduct(id) {
+        qeSelectedProduct = qeAllProducts.find(p => p.id === id);
+        if (!qeSelectedProduct) return;
+
+        document.getElementById('qeSearchState').style.display = 'none';
+        document.getElementById('qeSelectedName').innerText = qeSelectedProduct.name;
+        document.getElementById('qeSelectedUnit').innerText  = qeSelectedProduct.base_unit;
+        document.getElementById('qeAmountUnit').innerText    = qeSelectedProduct.base_unit;
+        document.getElementById('qeAmount').value = '';
+        document.getElementById('qeExistingPreview').style.display = 'none';
+        document.getElementById('qeExSuccessState').style.display = 'none';
+        document.getElementById('qeAmountState').style.display = '';
+        document.getElementById('qeExLogBtn').style.display = '';
+        document.getElementById('qeExLogBtn').disabled = true;
+        setTimeout(() => document.getElementById('qeAmount').focus(), 100);
+    }
+
+    function backToSearch() {
+        document.getElementById('qeAmountState').style.display = 'none';
+        document.getElementById('qeExLogBtn').style.display = 'none';
+        document.getElementById('qeSearchState').style.display = '';
+    }
+
+    function updateExistingPreview() {
+        const amount = parseFloat(document.getElementById('qeAmount').value) || 0;
+        const p = qeSelectedProduct;
+        if (!p || amount <= 0) {
+            document.getElementById('qeExistingPreview').style.display = 'none';
+            document.getElementById('qeExLogBtn').disabled = true;
+            return;
+        }
+
+        const weight = (p.base_unit === 'ea') ? (amount * p.weight_per_ea) : amount;
+        const f = weight / 0.1; // weight in kg → factor for per-100g macros
+        document.getElementById('qeExPrevKj').innerText = Math.round(p.kj_per_100 * f);
+        document.getElementById('qeExPrevP').innerText  = (p.protein_per_100 * f).toFixed(1);
+        document.getElementById('qeExPrevF').innerText  = (p.fat_per_100 * f).toFixed(1);
+        document.getElementById('qeExPrevC').innerText  = (p.carb_per_100 * f).toFixed(1);
+        document.getElementById('qeExistingPreview').style.display = '';
+        document.getElementById('qeExLogBtn').disabled = false;
+    }
+
+    function logExistingEat() {
+        const amount = parseFloat(document.getElementById('qeAmount').value) || 0;
+        if (!qeSelectedProduct || amount <= 0) return;
+
+        const data = new FormData();
+        data.append('action', 'log_existing');
+        data.append('product_id', qeSelectedProduct.id);
+        data.append('amount', amount);
+
+        fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status !== 'success') { alert('Error: ' + res.message); return; }
+                document.getElementById('qeAmountState').style.display = 'none';
+                document.getElementById('qeExLogBtn').style.display = 'none';
+                const m = res.macros;
+                document.getElementById('qeExSuccessMacros').innerText =
+                    `${m.kj} kJ · ${m.protein}g P · ${m.fat}g F · ${m.carb}g C`;
+                document.getElementById('qeExSuccessState').style.display = '';
+            });
+    }
+    </script>
+<?php include '../core/page_foot.php'; ?>

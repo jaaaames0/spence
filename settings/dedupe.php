@@ -2,50 +2,35 @@
 /**
  * SPENCE | Deduplication & Fuzzy Matching Engine (Phase 6.8: UI Refinement)
  */
+require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 require_once '../core/matching.php';
 $db = get_db_connection();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json');
-    $result = executeProductMerge($db, (int)$_POST['source_id'], (int)$_POST['target_id']);
-    echo json_encode($result);
-    exit;
-}
-
 $matches = findPotentialMatches($db);
-$stmt = $db->query("SELECT * FROM products WHERE merges_into IS NULL AND is_dropped = 0 ORDER BY name ASC");
+// Filter out recipe-linked products - they should not appear in manual merge lists or canonical catalog
+$product_query = "
+    SELECT p.* 
+    FROM products p 
+    LEFT JOIN recipes r ON p.recipe_id = r.id
+    WHERE p.merges_into IS NULL 
+      AND p.is_dropped = 0 
+      AND p.recipe_id IS NULL
+    ORDER BY p.name ASC";
+$stmt = $db->query($product_query);
 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$page_title   = 'Deduplication';
+$page_context = 'settings';
+$extra_styles = '<style>
+    .btn-merge { background: #6c757d; color: #fff; font-weight: bold; border: none; font-size: 0.75rem; padding: 4px 8px; transition: all 0.2s; }
+    .btn-merge:hover { background: #5a6268; transform: scale(1.05); }
+    .btn-dismiss { background: transparent; color: #555; border: 1px solid #444; font-size: 0.75rem; padding: 4px 8px; transition: all 0.2s; }
+    .btn-dismiss:hover { background: #2a2a2a; color: #f44336; border-color: #f44336; }
+    .btn-primary-spence { background: #6c757d; color: #fff; font-weight: bold; border: none; }
+    .btn-primary-spence:hover { background: #5a6268; }
+</style>';
+include '../core/page_head.php';
 ?>
-<!DOCTYPE html>
-<html lang="en" data-context="settings">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPENCE | Deduplication</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-serif; }
-        .table { color: #e0e0e0; vertical-align: middle; border-color: #333; }
-        .table-dark { --bs-table-bg: #1e1e1e; --bs-table-border-color: #333; }
-        .fw-black { font-weight: 900; letter-spacing: -1px; }
-        .uppercase { text-transform: uppercase; }
-        .text-muted { color: #888 !important; }
-        .text-accent { color: #00A3FF !important; }
-        .btn-merge { background: #6c757d; color: #fff; font-weight: bold; border: none; font-size: 0.75rem; padding: 4px 8px; transition: all 0.2s; }
-        .btn-merge:hover { background: #5a6268; transform: scale(1.05); }
-        .btn-primary-spence { background: #6c757d; color: #fff; font-weight: bold; border: none; }
-        .btn-primary-spence:hover { background: #5a6268; }
-        .form-select { background: #1a1a1a !important; border: 1px solid #333 !important; color: #fff !important; font-size: 0.9rem; }
-        .card { background-color: #1e1e1e; border: 1px solid #333; }
-        .nav-tabs { border-bottom: 2px solid #333; }
-        .nav-tabs .nav-link { color: #888; border: none; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; }
-        .nav-tabs .nav-link.active { background: none; color: #6c757d !important; border-bottom: 3px solid #6c757d; }
-    </style>
-</head>
-<body>
-    <?php include '../core/header.php'; ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
             <div class="col"><h2 class="fw-black uppercase mb-0">Settings</h2></div>
@@ -87,6 +72,12 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <button class="btn btn-primary-spence w-100 fw-bold py-2" onclick="forceMerge()">MERGE PRODUCTS</button>
                         </div>
                     </div>
+                    <div class="mt-3 pt-3 border-top border-secondary">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="blendMacros">
+                            <label class="form-check-label small text-muted fw-bold uppercase" for="blendMacros">Blend Macros on Merge <span class="text-secondary fw-normal" style="text-transform: none;">(default: preserve canonical macros)</span></label>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="card overflow-hidden">
@@ -99,7 +90,7 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <tr class="text-muted small">
                                     <th>POTENTIAL MATCHES</th>
                                     <th class="text-center" style="width: 120px;">ENGINE</th>
-                                    <th class="text-end" style="width: 280px;">ACTIONS</th>
+                                    <th class="text-end" style="width: 340px;">ACTIONS</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -118,7 +109,8 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     <td class="text-center"><span class="badge bg-secondary opacity-50 small"><?= $m['distance'] ?></span></td>
                                     <td class="text-end">
                                         <button class="btn btn-merge me-1" onclick="merge(<?= $m['p2']['id'] ?>, <?= $m['p1']['id'] ?>, '<?= addslashes($m['p2']['name']) ?>', '<?= addslashes($m['p1']['name']) ?>')">Merge Left</button>
-                                        <button class="btn btn-merge" onclick="merge(<?= $m['p1']['id'] ?>, <?= $m['p2']['id'] ?>, '<?= addslashes($m['p1']['name']) ?>', '<?= addslashes($m['p2']['name']) ?>')">Merge Right</button>
+                                        <button class="btn btn-merge me-1" onclick="merge(<?= $m['p1']['id'] ?>, <?= $m['p2']['id'] ?>, '<?= addslashes($m['p1']['name']) ?>', '<?= addslashes($m['p2']['name']) ?>')">Merge Right</button>
+                                        <button class="btn btn-dismiss" onclick="dismiss(<?= $m['p1']['id'] ?>, <?= $m['p2']['id'] ?>)" title="Not a match — remove from suggestions"><i class="bi bi-x-lg"></i></button>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -146,7 +138,6 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     function forceMerge() {
         const sourceId = document.getElementById('manualSource').value;
@@ -158,16 +149,28 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
         merge(sourceId, targetId, sourceName, targetName);
     }
     function merge(sourceId, targetId, sourceName, targetName) {
-        if (!confirm(`Merge "${sourceName}" into "${targetName}"?\n\nThis moves inventory, recipes, and logs, and creates a permanent ingest alias.`)) return;
+        const blend = document.getElementById('blendMacros').checked;
+        const macroNote = blend ? 'Macros will be averaged.' : 'Canonical macros will be preserved.';
+        if (!confirm(`Merge "${sourceName}" into "${targetName}"?\n\n${macroNote}\nThis moves inventory, recipes, and logs, and creates a permanent ingest alias.`)) return;
         const data = new FormData();
         data.append('action', 'merge');
         data.append('source_id', sourceId);
         data.append('target_id', targetId);
-        fetch('dedupe.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+        data.append('blend_macros', blend ? '1' : '0');
+        fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            if (res.status === 'success') location.reload();
+            else alert(res.message);
+        });
+    }
+    function dismiss(idA, idB) {
+        const data = new FormData();
+        data.append('action', 'dismiss_dedupe_pair');
+        data.append('id_a', idA);
+        data.append('id_b', idB);
+        fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
             if (res.status === 'success') location.reload();
             else alert(res.message);
         });
     }
     </script>
-</body>
-</html>
+<?php include '../core/page_foot.php'; ?>

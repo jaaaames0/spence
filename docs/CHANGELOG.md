@@ -1,6 +1,56 @@
 # SPENCE | Changelog
 
-### v1.0-RC1 (2026-02-22) - "The Sovereign Release"
+### v1.6.0 (2026-04-05) - "Mobile Pass"
+- **Mobile Navigation:** Replaced Bootstrap hamburger with a permanent single-line icon nav on mobile. Each item shows its icon above a centred label — no toggle required. Labels abbreviated (DB, SET) to fit without overflow.
+- **Section Headers:** All page headers now stack cleanly on mobile via a 3-layer pattern (heading / search / actions). Log pages exception: heading and date picker remain inline. Weekly page exception: date picker inline with heading, rolling/mon-sun toggle drops to its own right-aligned row.
+- **Stock Table:** 9 secondary columns (PRICE hidden — now primary, macros, location, category) hidden on mobile behind a per-row chevron expand. Expanded section shows macro badges with units and category on a single line. Column settings button hidden on mobile.
+- **Daily Log Cards:** Prot ROI card removed site-wide. Remaining 6 stat cards go 2×3 portrait on mobile.
+- **Weekly Cards:** 6 period-average stat cards go 2×3 portrait on mobile.
+- **Log Table:** Macro columns (kJ/P/F/C/Cost) hidden on mobile; values shown as a compact inline line below the item name. Recipe breakdown child rows also hide macro columns on mobile.
+- **Log Name Resolution:** Ghost recipe (Fork) names in the consumption log now resolve to the canonical parent recipe name via JOIN.
+- **RecipeDB Table:** SERVES, FAT/SERVE, CARBS/SERVE columns hidden on mobile. Serves count shown inline below recipe name. Visible on mobile: kJ/SERVE, PROTEIN/SERVE, $/SERVE.
+- **Settings:** Macro target boxes go 2×2 on mobile. Phantom placeholder search bar hidden on mobile to remove the gap between heading and tabs.
+- **Eat / Cook:** Badge legend (kJ / Protein / Cost) visible on mobile; verbose unit suffix ("per 100g / per 100mL / each") hidden on mobile only.
+- **PWA / CSS:** All mobile styles centralised in `core/spence.css`; `.mob-detail-row` utility suppressed at `md+`.
+
+### v1.5.0 (2026-04-05) - "Intelligence Dashboard"
+- **Dashboard Overhaul:** Replaced static hero-link grid with a live 4×2 intelligence dashboard at `index.php`. Standard nav/header now present on landing page.
+- **Today's Energy & Protein:** Progress bar cards vs. user goals, whole-number precision in this context.
+- **Pantry Value:** Live `SUM(price_paid)` across all stocked inventory with product count.
+- **Monthly Spend Projection:** Rolling 30-day consumption average extrapolated to full month length.
+- **7-Day kJ Trend:** Chart.js bar chart — bars turn green when daily goal is met, orange otherwise; empty days rendered transparent.
+- **Top 3 Energy & Protein Sources (30d):** Ranked lists with name, value, and % share of total 30-day intake. Rank 1 gets accent colour; ranks 2–3 stepped down visually.
+- **Favourite Meal (30d):** Most-cooked recipe by serve count; ghost forks resolve to canonical parent name so variants count toward the same total.
+- **Expiring Soon:** Placeholder commented out in code, ready to activate when expiry tracking is wired up.
+
+### v1.4.0 (2026-04-05) - "Spice Rack"
+- **Synchronous Receipt Ingest:** Retired the `watcher.sh` async pipeline. `receipt_api.php` now completes the full scan (upload → OpenRouter vision → ingest → merge suggestions) in a single HTTP request, matching the Quick Eat pattern. PDF path also retired.
+- **Spice Rack tables:** `spice_rack` and `recipe_spices` auto-migrate on every DB connection via `get_db_connection()`.
+- **Canonical Spice Seed:** 18 spices pre-seeded with `INSERT OR IGNORE` on boot — Salt, Black Pepper, Paprika, Garlic Powder, Onion Powder first (fixed order), then rest alphabetically. Custom spices can be added via UI.
+- **Receipt AI routing:** Items classified as `Spice/Herb` by the vision model are routed to `spice_rack` (insert or restock) instead of inventory. Restock resets `uses_since_restock` and clears `restock_flagged`.
+- **Stock page — Spice modal:** Fire icon button in the header toolbar opens a Bootstrap modal with toggle switches (stocked/depleted), amber restock badge, and custom add input. Amber dot on the toolbar button if any spice is flagged.
+- **RecipeDB — Spice Requirements:** Inline in the recipe modal alongside Tags (col-md-7), always visible, checkbox grid with canonical ordering. Selection count badge. Saved after `save_recipe` resolves its new ID.
+- **Cook page — Spice Check:** Read-only panel below ingredient list. Green dot = stocked, amber = restock flagged, red = not stocked. Loaded lazily; hidden if recipe has no spices assigned.
+- **Use counter:** Each `cook` action increments `uses_since_restock` for all spices linked to that recipe. `restock_flagged` flips at 40 uses.
+- **Spice ordering:** `get_spices` orders Salt → Black Pepper → Paprika → Garlic Powder → Onion Powder, then alphabetically — applied consistently across all surfaces.
+
+### v1.3.0 (2026-04-05) - "Platform Foundation"
+- **HMAC Cookie Auth:** Replaced PHP session-based auth (susceptible to session GC wipe) with a 1-year HMAC cookie. Token derived via `hash_hmac('sha256', 'spence_auth_v1', $ACCESS_KEY)`. Login once, stay in for a year.
+- **PWA Packaging:** Added `site.webmanifest`, SVG favicon (bold S in `#00A3FF` on `#121212`), and mobile-web-app-capable meta tags. SPENCE is now installable as a home screen app. Status bar keeps `#121212` background.
+- **Column Settings fix:** `col-hidden { display: none !important }` was missing from `spence.css` — the JS was toggling the class but nothing was defined. Added the rule; CSS cache busted with `?v=2` on the link tag. Apply button now explicitly calls `applyColumnSettings()`.
+- **Cook page styling regression fixed:** Restored cook-red (`#f44336`) hover border (full thin border, not thick left-only), correct `badge-tag` accent via `[data-context="cook"]` CSS selector, and `tag-header` alignment matching `eat/index.php`.
+- **RecipeDB modal redesign:** 4-row layout — Name + Servings / Ingredients + Macro box / Tags + Spices / Instructions. Macro box is a persistent 2×3 grid (Per Serve + kJ / P + F / C + $) that shows dashes until data is entered. Ingredient rows use pure flexbox (`d-flex flex-nowrap`) to prevent wrapping. Stock button reduced to icon-only (`bi-arrow-up-circle`), hover-only colour for both stock and trash buttons.
+
+### v1.2.0 (2026-04-05) - "Fluid Cook"
+- **On-the-Fly Recipe Forking**: Cook page now supports live ingredient substitution and custom quantities without modifying the master recipe. Any deviation (sub selected or qty differs from canonical) auto-creates a Ghost Recipe fork with full fingerprinting to prevent duplicate ghosts.
+- **Ingredient Substitution UX**: Ingredient name row doubles as dropdown trigger (chevron hint, no extra button). State icon toggles between `›` (open picker) and `↺` (reset to canonical) based on modification state. Outside-click closes picker.
+- **Custom Amounts with Tolerance**: Recipe deduction accepts up to 10g undershoot ("use what you have"). Ghost fork records base-equivalent amounts (actual ÷ multiplier) for per-batch consistency.
+- **Live Cook Macros + Cost**: kJ, protein, and `$`/serve badges in the cook header update in real time as quantities change or substitutions are selected.
+- **Live RecipeDB Macros + Cost**: Build/Edit recipe modal now shows a live per-serve macro bar (kJ / P / F / C / `$`) that updates as ingredients and serving count change.
+- **RecipeDB Custom Autocomplete**: Replaced `<datalist>` with a custom dropdown showing stock-on-hand alongside each suggestion. "Use All Stock" button pre-fills the amount field.
+- **Quick Eat UX**: Consolidated to a single dropdown button (Camera / Existing Product). Fixed Android camera access (`accept="image/*;capture=camera"` + form wrapper). Removed dead JS references to retired modal elements.
+
+### v1.0.0 (2026-02-22) - "The Sovereign Release"
 - **Terminology Refactor**: Completed the full-stack migration from "Portions" to **"Serves"**. Updated database schema (`yield_serves`), API logic, and every front-end dashboard for consistency.
 - **RecipeDB Polish**: 
     - Fixed the clickable **Tag Cloud** in the Build/Edit modal by implementing a dynamic, self-healing tag extraction engine.
@@ -21,98 +71,40 @@
 - **Sovereign Rebranding**: Renamed `pantry.db` -> `spence.db` across the entire codebase and filesystem.
 - **Concept-Aware Matching**: Refined deduplication logic to share 2+ tokens (1+ meaningful) to catch specific variants (e.g., "Free Range Eggs").
 - **UI Anchor Standard**: Normalized search bar layouts and grid column widths across all dashboard modules.
-- **Signal Migration**: Successfully moved system alerts and communications to a sovereign Signal channel (+61431112973).
-- **Purge Protocol**: Wiped operational data (inventory, logs, products) for clean Release Candidate zero-state.
 
 ### v0.11.5 (2026-02-21)
 - **Intelligence Strike (Dedupe v2)**: Rebuilt matching engine with Category Locking, Jaccard Similarity (60%), and unique Group-Root concept matching.
 - **Sovereign Normalization**: Vision model now strips weights/volumes from names; alphabetical token sorting fixes "Red Onion" vs "Onion Red".
 - **Proactive UX**: Integrated "Cleanup Suggestions" modal in Stock dashboard; implemented directional flippable merges and real-time conflict detection.
 - **Dropped Protocol**: Added `is_dropped` flag to Product Master to permanently ignore high-frequency noise (e.g., Paper Bags) from future ingests.
-- **UX Theater**: Implemented staged feedback loop for receipt uploads to smooth over Gemini/Ingest latency spikes.
 - **Raid Integrity**: Refactored `raid_api.php` to sync recipe macros before logging "Eat Now" portions, resolving the 0-macro leftover bug.
 - **Hardened Ingest**: Switched to case-insensitive name matching (`LOWER()`) in ingest bridge to prevent duplicate name drift.
-- **Security Audit**: Verified SSH "PasswordAuthentication no" status; hardened web root with 2775/664 ownership recursively under `www-data`.
 
 ### v0.10.2 (2026-02-20)
 - **Identity Architecture**: Launched User Profile system with `user_profiles`, `user_vitals_history`, and `user_goals_history`.
 - **Katch-McArdle Engine**: Integrated TDEE/BMR calculations based on LBM (Lean Body Mass).
-- **Macro Precision**: Standardized 1g protein per lb of LBM; implemented proportional macro rebalancer sliders with 50/50 Fat/Carb defaults.
+- **Macro Precision**: Standardized 1g protein per lb of LBM; implemented proportional macro rebalancer sliders with 50/30/20 defaults.
 - **Economic Logic**: Automated 2-decimal daily ceilings from weekly discretionary budgets.
-- **Theme Polish**: Established "Settings Grey" (#6c757d) for config isolation; replaced Warning Amber with kJ Warning Orange (#ff9800) for EAT context.
-- **Log UI Harmonization**: Updated Daily Log headers and rows to use canonical macro colors (kJ=Orange, P=Blue, F=Red, C=Purple, Cost=Green).
 
 ### v0.8.6 (2026-02-20)
 - **Warehouse Customization**: Added localStorage-persistent column visibility to Stock dashboard.
 - **Sort Hardening**: Implemented canonical category sorting (Meal Prep -> Other) and alphabetical sub-sorting.
-- **Log Heroes**: Added Fat/Carb heroes to daily log; converted Composition to interactive Pie chart with hover-grow effect.
+- **Log Heroes**: Added Fat/Carb heroes to daily log; converted Composition to interactive Pie chart.
 
 ### v0.8.5 (2026-02-19)
 - **Immutable Genesis Versioning**: Overhauled RecipeDB to treat recipes as versioned entities. Edits archive the old version and spawn new blueprint/product pairs to protect historical log integrity.
 - **Portal Symmetry**: Rebuilt homepage as 3x2 high-density grid; consolidated brand logo as root navigator.
-- **Warehouse Customization**: Added localStorage-persistent column visibility and canonical category sorting.
-- **Dedupe v1.0**: Implemented first hybrid matching engine with synonym maps (Mince/Ground/Burger) and alias persistence.
+- **Dedupe v1.0**: Implemented first hybrid matching engine with synonym maps and alias persistence.
 
-### v0.5.8 (2023-02-13)
-- **Economic Durability**: Implemented Persistent Unit Costing (`last_unit_cost`) to prevent data loss on 0-stock refunds.
-- **Flat Log Parity**: Nuked nested tables in Log for flat <tr> integration and perfect alignment.
-
-### v0.5.0 (2023-02-12)
+### v0.5.0 — v0.6.1 (2026-02-12/13)
 - **Intake Engine**: Initial launch of the Consumption Log and aggregate macro tracking.
-
-### v0.6.1 (2026-02-13)
-- **Visual Stabilization**: Introduced "The Spacer Protocol" (38px alignment) and Danger Red (#f44336) Cook accent.
-- **Persistent Unit Costing**: Added `last_unit_cost` to preserve price memory even when stock hits zero.
-- **Flat Log Parity**: Nuked nested tables in Log for flat <tr> integration and perfect alignment.
-- **Price-Ratio Locking**: Refactored API to enforce proportional price reduction during consumption (qty consumption scales price_paid).
+- **Persistent Unit Costing**: `last_unit_cost` preserves price memory when stock hits zero.
+- **Price-Ratio Locking**: Proportional price reduction enforced during consumption.
 
 ### v0.4.0 (2026-02-11)
-- **Unified Product Engine**: core refactor splitting data into `products` (master nutrition) and `inventory` (physical stock).
+- **Unified Product Engine**: Core refactor splitting data into `products` (master nutrition) and `inventory` (physical stock).
 - **The James Constant**: Implemented `weight_per_ea` for accurate macro derivation from unit-based products.
-- **Dynamic Precision**: Automated decimal scaling (0 for ea, 3 for kg/L) across the UI.
 - **Cook Engine v1.0**: Initial launch of the multiplier logic and atomic stock deduction.
-
-# SPENCE: System Architecture (v0.3.2)
-
-## Overview
-SPENCE (formerly PantryOS) is a Gemini-native kitchen intelligence platform. The name derives from the Middle English "spence" (a larder or storeroom), rooted in the Latin "dispendere"╬ô├ç├╢to weigh out and dispense. It has evolved from a simple inventory tracker into a high-precision macro-extraction engine...
-
-## Directory Structure
-- `index.php`: Main Landing (v3.0). Choice between Stock and Raid.
-- `stock/index.php`: Inventory Dashboard (formerly main index).
-- `raid/index.php`: Raid Entry.
-- `raid/eat/index.php`: Single item consumption.
-- `raid/cook/index.php`: Recipe engine (Pending).
-- `core/`: Execution engine.
-    - `watcher.sh`: Vision Watcher (v3.0). Gemini 3 Flash / SKU Recall / Sticker Fusion.
-    - `bridge_ingest.php`: Ingests Vision results. Gemini-first nutrition.
-    - `db_helper.php`: Shared PDO database logic.
-    - `api.php`: Central AJAX API for Stock management.
-    - `raid_api.php`: API for consumption logging.
-    - `batch_nutrition.php`: Batched Gemini enrichment for user-corrected items.
-    - `upload.php`: Receipt upload handler with Job ID tracking.
-- `database/`: Persistent storage (`spence.db`).
-- `docs/`: System documentation and roadmaps.
-- `uploads/`: Raw receipt images/PDFs.
-
-## The Ingestion Loop (v0.3.1)
-1. **Upload:** User uploads image -> `upload.php` creates job -> Redirect to `stock/index.php?active_job=ID`.
-2. **Reactive UI:** `stock/index.php` polls `api.php?action=check_job` every 2s.
-
-## The Raid Loop (v0.3.0)
-1. **Selection:** User selects item in `eat/`.
-2. **Consumption:** User inputs amount -> `raid_api.php` updates inventory and logs to `consumption_log`.
-3. **Macros:** Macros are calculated and frozen at the point of consumption in the log.
-
-## Database Schema (`spence.db`)
-- `inventory`: `id, name, current_qty, unit, price_paid, location, updated_at`.
-- `jobs`: `id, file_path, status, result_json, message, created_at`.
-- `master_nutrition`: `name_key, kj_per_100, protein_per_100, fat_per_100, carb_per_100`.
-- `consumption_log`: `id, date, item_name, qty_consumed, unit, kj, protein, fat, carbs`.
-
-## Maintenance
-- **Watcher Status:** `ps aux | grep watcher.sh`
-- **Logs:** `docs/watcher.log` (daemonized output).
 
 ### v0.1.0 (2026-02-09)
 - **Genesis**: Initial receipt parsing engine and inventory tracking.

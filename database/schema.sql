@@ -2,7 +2,7 @@ CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
 CREATE TABLE inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL, current_qty REAL NOT NULL, unit TEXT NOT NULL, price_paid REAL DEFAULT 0, location TEXT DEFAULT 'Pantry', expiry_date DATE, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (product_id) REFERENCES products(id));
 CREATE TABLE recipes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, instructions TEXT, yield_serves INTEGER DEFAULT 1, product_id INTEGER REFERENCES products(id), is_active INTEGER DEFAULT 1, parent_recipe_id INTEGER REFERENCES recipes(id), version INTEGER DEFAULT 1, tags TEXT);
 CREATE TABLE recipe_ingredients (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER NOT NULL, product_id INTEGER NOT NULL, amount REAL NOT NULL, unit TEXT NOT NULL, wastage_factor REAL DEFAULT 1.0, FOREIGN KEY (recipe_id) REFERENCES recipes(id), FOREIGN KEY (product_id) REFERENCES products(id));
-CREATE TABLE consumption_log (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, recipe_id INTEGER, amount REAL, unit TEXT, kj REAL, protein REAL, fat REAL, carb REAL, consumed_at DATETIME DEFAULT CURRENT_TIMESTAMP, unit_cost REAL DEFAULT 0);
+CREATE TABLE consumption_log (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, recipe_id INTEGER, amount REAL, unit TEXT, kj REAL, protein REAL, fat REAL, carb REAL, consumed_at DATETIME DEFAULT CURRENT_TIMESTAMP, unit_cost REAL DEFAULT 0, source TEXT DEFAULT 'inventory', name TEXT);
 CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, file_path TEXT, status TEXT DEFAULT 'pending', message TEXT, result_json TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE product_aliases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,3 +40,4 @@ CREATE TABLE user_goals_history (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE recipe_tags_master (tag_name TEXT PRIMARY KEY);
+CREATE TABLE dedupe_dismissed (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id_a INTEGER NOT NULL, product_id_b INTEGER NOT NULL, dismissed_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(product_id_a, product_id_b));
