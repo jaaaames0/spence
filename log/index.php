@@ -119,6 +119,7 @@ $extra_styles = '<style>
     .details-pane td { border-bottom: none !important; }
     .child-row { font-size: 0.9rem; opacity: 0.7; border-left: 4px solid #333; }
     .child-row:hover { opacity: 1; }
+    .edit-btn:hover { color: #ff9800 !important; }
     .trash-btn:hover { color: #f44336 !important; }
 </style>';
 include '../core/page_head.php';
@@ -163,6 +164,7 @@ include '../core/page_head.php';
                     <tbody>
                         <?php if (empty($log_entries)): ?><tr><td colspan="10" class="text-center p-5 text-muted uppercase fw-bold small">Zero fuel detected in period.</td></tr><?php endif; ?>
                         <?php foreach ($log_entries as $entry): ?>
+                                <?php $can_edit_quick_eat = ($entry['source'] ?? '') === 'quick_eat' && $entry['quick_eat_kj_per_100'] !== null; ?>
                                 <tr class="entry-row" id="row-<?= $entry['id'] ?>" onclick="<?= $entry['recipe_id'] ? 'toggleLogDetails('.$entry['id'].')' : '' ?>">
                                     <td class="text-center"><?php if($entry['recipe_id']): ?><i class="bi bi-chevron-right chevron-<?= $entry['id'] ?>"></i><?php endif; ?></td>
                                     <td class="text-muted small"><?= date('H:i', strtotime($entry['local_consumed_at'])) ?></td>
@@ -182,7 +184,9 @@ include '../core/page_head.php';
                             <td class="d-none d-md-table-cell text-center color-f fw-bold"><?= number_format($entry['fat'], 1) ?>g</td>
                             <td class="d-none d-md-table-cell text-center color-c fw-bold"><?= number_format($entry['carb'], 1) ?>g</td>
                             <td class="d-none d-md-table-cell text-center color-cost fw-bold">$<?= number_format($entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']), 2) ?></td>
-                            <td class="text-end"><button class="btn btn-link text-muted p-0 trash-btn" onclick="event.stopPropagation(); deleteEntry(<?= $entry['id'] ?>, '<?= $entry['source'] ?? 'inventory' ?>')"><i class="bi bi-trash"></i></button></td>
+                            <td class="text-end text-nowrap">
+                                <?php if ($can_edit_quick_eat): ?><button class="btn btn-link text-muted p-0 me-2 edit-btn" title="Edit amount" onclick="event.stopPropagation(); openQuickEatEdit(<?= (int)$entry['id'] ?>, <?= htmlspecialchars(json_encode((float)$entry['amount']), ENT_QUOTES, 'UTF-8') ?>, <?= htmlspecialchars(json_encode($entry['unit']), ENT_QUOTES, 'UTF-8') ?>, <?= htmlspecialchars(json_encode($entry['product_name']), ENT_QUOTES, 'UTF-8') ?>)"><i class="bi bi-pencil"></i></button><?php endif; ?><button class="btn btn-link text-muted p-0 trash-btn" onclick="event.stopPropagation(); deleteEntry(<?= $entry['id'] ?>, '<?= $entry['source'] ?? 'inventory' ?>')"><i class="bi bi-trash"></i></button>
+                            </td>
                         </tr>
                         <?php if($entry['recipe_id']): ?>
                         <tbody class="details-pane" id="details-<?= $entry['id'] ?>">
@@ -203,6 +207,27 @@ include '../core/page_head.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <div class="modal fade" id="quickEatEditModal" tabindex="-1" aria-labelledby="quickEatEditTitle" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title fw-black uppercase" id="quickEatEditTitle">Correct Quick Eat</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="quickEatEditName" class="fw-bold text-white mb-3"></div>
+                        <label for="quickEatEditAmount" class="form-label small fw-bold text-muted uppercase">Amount (<span id="quickEatEditUnit"></span>)</label>
+                        <input type="number" min="0.001" step="0.001" class="form-control form-control-lg fw-bold" id="quickEatEditAmount" onkeydown="if(event.key === 'Enter') { event.preventDefault(); saveQuickEatEdit(); }">
+                        <div class="form-text text-muted">Macros will be recalculated from the nutrition captured when this was logged. Inventory is not affected.</div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">CANCEL</button>
+                        <button type="button" class="btn fw-black uppercase" onclick="saveQuickEatEdit()" style="background:#ff9800; color:#000; border:none;">SAVE CORRECTION</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -258,6 +283,30 @@ include '../core/page_head.php';
         data.append('action', 'delete_log');
         data.append('id', id);
         fetch('../core/raid_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if (res.status === 'success') location.reload(); else alert(res.message); });
+    }
+
+    let quickEatEditId = null;
+    const quickEatEditModal = new bootstrap.Modal(document.getElementById('quickEatEditModal'));
+    function openQuickEatEdit(id, amount, unit, name) {
+        quickEatEditId = id;
+        document.getElementById('quickEatEditName').textContent = name;
+        document.getElementById('quickEatEditUnit').textContent = unit;
+        const input = document.getElementById('quickEatEditAmount');
+        input.value = amount;
+        input.step = unit === 'ea' ? '1' : '0.001';
+        input.min = unit === 'ea' ? '1' : '0.001';
+        quickEatEditModal.show();
+    }
+    function saveQuickEatEdit() {
+        const amount = parseFloat(document.getElementById('quickEatEditAmount').value);
+        if (!quickEatEditId || !amount || amount <= 0) { alert('Enter an amount greater than zero.'); return; }
+        const data = new FormData();
+        data.append('action', 'edit_log');
+        data.append('id', quickEatEditId);
+        data.append('amount', amount);
+        fetch('../core/raid_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            if (res.status === 'success') location.reload(); else alert(res.message);
+        });
     }
     </script>
 <?php include '../core/page_foot.php'; ?>

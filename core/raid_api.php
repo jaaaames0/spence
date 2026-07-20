@@ -120,6 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $price_reduction = $unit_cost * $consume_qty;
             $stmt = $db->prepare("UPDATE inventory SET current_qty = current_qty - ?, price_paid = price_paid - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
             $stmt->execute([$consume_qty, $price_reduction, $inventory_id]);
+            normalizeInventoryBalance($db, (int)$inventory_id);
 
             logConsumption($db, $item['product_id'], $consume_qty, $item['base_unit']);
             $db->commit();
@@ -203,6 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $price_reduction = $unit_cost * $deduct;
                     $db->prepare("UPDATE inventory SET current_qty = current_qty - ?, price_paid = price_paid - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
                        ->execute([$deduct, $price_reduction, $row['id']]);
+                    normalizeInventoryBalance($db, (int)$row['id']);
                     $remaining -= $deduct;
                 }
                 // Tolerate tiny residual (rounding / "use all" edge cases)
@@ -267,10 +269,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         elseif ($_POST['action'] === 'edit_log') {
             $log_id = (int)$_POST['id'];
             $new_amount = (float)$_POST['amount'];
+            if ($new_amount <= 0) throw new Exception("Amount must be greater than zero.");
             $stmt = $db->prepare("SELECT * FROM consumption_log WHERE id = ?");
             $stmt->execute([$log_id]);
             $log = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$log) throw new Exception("Log entry not found.");
+
+            // Quick Eat uses an immutable nutrition snapshot and never touches inventory.
+            if (($log['source'] ?? 'inventory') === 'quick_eat') {
+                if ($log['quick_eat_kj_per_100'] === null) {
+                    throw new Exception("Only Quick Eat entries logged after this update can be edited.");
+                }
+                $weight = ($log['unit'] === 'ea')
+                    ? $new_amount * (float)$log['quick_eat_weight_per_ea']
+                    : $new_amount;
+                $factor = $weight / 0.1;
+                $kj = (int)round($factor * (float)$log['quick_eat_kj_per_100']);
+                $protein = round($factor * (float)$log['quick_eat_protein_per_100'], 1);
+                $fat = round($factor * (float)$log['quick_eat_fat_per_100'], 1);
+                $carb = round($factor * (float)$log['quick_eat_carb_per_100'], 1);
+                $stmt = $db->prepare("UPDATE consumption_log SET amount = ?, kj = ?, protein = ?, fat = ?, carb = ? WHERE id = ?");
+                $stmt->execute([$new_amount, $kj, $protein, $fat, $carb, $log_id]);
+                $db->commit();
+                echo json_encode(['status' => 'success']);
+                exit;
+            }
             
             $stmt = $db->prepare("SELECT base_unit FROM products WHERE id = ?");
             $stmt->execute([$log['product_id']]);

@@ -42,6 +42,7 @@ try {
             . "(e.g., 'Grilled Chicken Breast', 'Greek Yogurt', 'Beef Fried Rice').\n"
             . "- Estimated Weight: Total grams of that specific item visible, or a standard single serving if unclear.\n"
             . "- Macros: Per-100g values. For packaged items, read from the label. For prepared food, estimate.\n"
+            . "- Estimated Cost: The total Australian-dollar cost of the visible portion, not a per-100g price. Estimate from typical local retail or menu pricing.\n"
             . "- Category: Best fit from the enum.\n\n"
             . "Return ONLY a valid JSON array of objects, one per distinct food item.";
 
@@ -54,12 +55,13 @@ try {
                 'protein_per_100'    => ['type' => 'number'],
                 'fat_per_100'        => ['type' => 'number'],
                 'carbs_per_100'      => ['type' => 'number'],
+                'estimated_cost_aud' => ['type' => 'number'],
                 'category'           => ['type' => 'string', 'enum' => [
                     'Meal Prep', 'Proteins', 'Dairy', 'Bread',
                     'Fruit and Veg', 'Cereals/Grains', 'Snacks/Confectionary', 'Drinks', 'Other'
                 ]]
             ],
-            'required' => ['name', 'estimated_weight_g', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100', 'category'],
+            'required' => ['name', 'estimated_weight_g', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100', 'estimated_cost_aud', 'category'],
             'additionalProperties' => false
         ];
 
@@ -119,7 +121,7 @@ try {
         if (!is_array($items) || empty($items)) throw new Exception("No items to log.");
 
         $db->beginTransaction();
-        $total = ['kj' => 0, 'protein' => 0, 'fat' => 0, 'carb' => 0];
+        $total = ['kj' => 0, 'protein' => 0, 'fat' => 0, 'carb' => 0, 'cost' => 0];
 
         foreach ($items as $item) {
             $name          = trim($item['name'] ?? '');
@@ -128,6 +130,7 @@ try {
             $prot_per_100  = (float)($item['protein_per_100'] ?? 0);
             $fat_per_100   = (float)($item['fat_per_100'] ?? 0);
             $carb_per_100  = (float)($item['carbs_per_100'] ?? 0);
+            $estimated_cost = max(0, (float)($item['estimated_cost_aud'] ?? 0));
             $category      = $item['category'] ?? 'Other';
             $add_to_master = !empty($item['add_to_master']);
 
@@ -156,13 +159,16 @@ try {
             // Store name on the log row so it displays correctly when product_id is null
             $log_name = $product_id ? null : $name;
 
-            $db->prepare("INSERT INTO consumption_log (product_id, name, amount, unit, kj, protein, fat, carb, unit_cost, source) VALUES (?, ?, ?, 'kg', ?, ?, ?, ?, 0, 'quick_eat')")
-               ->execute([$product_id, $log_name, $weight_g / 1000.0, $kj, $protein, $fat, $carb]);
+            $amount_kg = $weight_g / 1000.0;
+            $unit_cost = $estimated_cost / $amount_kg;
+            $db->prepare("INSERT INTO consumption_log (product_id, name, amount, unit, kj, protein, fat, carb, unit_cost, source, quick_eat_kj_per_100, quick_eat_protein_per_100, quick_eat_fat_per_100, quick_eat_carb_per_100) VALUES (?, ?, ?, 'kg', ?, ?, ?, ?, ?, 'quick_eat', ?, ?, ?, ?)")
+               ->execute([$product_id, $log_name, $amount_kg, $kj, $protein, $fat, $carb, $unit_cost, $kj_per_100, $prot_per_100, $fat_per_100, $carb_per_100]);
 
             $total['kj']      += $kj;
             $total['protein'] += $protein;
             $total['fat']     += $fat;
             $total['carb']    += $carb;
+            $total['cost']    += $estimated_cost;
         }
 
         $db->commit();
@@ -182,11 +188,12 @@ try {
         if (!$product) throw new Exception("Product not found.");
 
         $macros = calculateMacros($product, $amount, $product['base_unit']);
+        $unit_cost = getUnitCost($db, $product_id);
 
-        $db->prepare("INSERT INTO consumption_log (product_id, amount, unit, kj, protein, fat, carb, unit_cost, source) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'quick_eat')")
-           ->execute([$product_id, $amount, $product['base_unit'], $macros['kj'], $macros['protein'], $macros['fat'], $macros['carb']]);
+        $db->prepare("INSERT INTO consumption_log (product_id, amount, unit, kj, protein, fat, carb, unit_cost, source, quick_eat_kj_per_100, quick_eat_protein_per_100, quick_eat_fat_per_100, quick_eat_carb_per_100, quick_eat_weight_per_ea) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'quick_eat', ?, ?, ?, ?, ?)")
+           ->execute([$product_id, $amount, $product['base_unit'], $macros['kj'], $macros['protein'], $macros['fat'], $macros['carb'], $unit_cost, $product['kj_per_100'], $product['protein_per_100'], $product['fat_per_100'], $product['carb_per_100'], $product['weight_per_ea']]);
 
-        echo json_encode(['status' => 'success', 'macros' => $macros]);
+        echo json_encode(['status' => 'success', 'macros' => $macros, 'cost' => $amount * $unit_cost]);
 
     } else {
         throw new Exception("Unknown action.");

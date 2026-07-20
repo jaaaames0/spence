@@ -63,6 +63,7 @@ include '../core/page_head.php';
                 <div class="input-group" style="max-width: 400px;">
                     <input type="text" id="tableSearch" class="form-control" placeholder="Search inventory..." oninput="filterTable(this.value)">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <button class="search-clear" type="button" data-clear-target="tableSearch" onclick="clearSearchField('tableSearch')" title="Clear search" aria-label="Clear search"><i class="bi bi-x-lg"></i></button>
                 </div>
             </div>
             <div class="col-md-5 text-end d-flex justify-content-end gap-2">

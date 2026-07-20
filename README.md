@@ -80,6 +80,10 @@ sk-or-v1-your-key-here
 
 Open `core/auth.php` and change the `ACCESS_KEY` constant from the default before exposing SPENCE to any network.
 
+### Optional: connect FORGE
+
+SPENCE reads FORGE bodyweight and caliper body-fat data on the Progress page without writing to FORGE. In the standard sibling-app layout it automatically uses `../forge/database/forge.db`. To use another location, set `FORGE_DB_PATH` in the PHP-FPM environment to the absolute path of Forge's database.
+
 ### 6. Visit the app
 
 Navigate to your configured hostname. On first visit, go to **Settings** to initialise your user profile and macro targets.

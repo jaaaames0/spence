@@ -27,9 +27,8 @@ $stmt = $db->prepare("
     SELECT 
         DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') as log_date,
         SUM(kj) as day_kj, SUM(protein) as day_p, SUM(fat) as day_f, SUM(carb) as day_c,
-        SUM(cl.amount * p.last_unit_cost) as day_cost
+        SUM(cl.amount * cl.unit_cost) as day_cost
     FROM consumption_log cl
-    JOIN products p ON cl.product_id = p.id
     WHERE DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') BETWEEN ? AND ?
     GROUP BY log_date
     ORDER BY log_date ASC");

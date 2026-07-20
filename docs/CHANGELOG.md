@@ -1,5 +1,13 @@
 # SPENCE | Changelog
 
+### Unreleased (2026-07-20) - "Quick Eat & Forge Foundations"
+- **Quick Eat Corrections:** Photo and existing-product Quick Eat entries now preserve an immutable nutrition snapshot. New Quick Eat entries can be corrected from the daily log without affecting inventory or requiring a Product Master record.
+- **Quick Eat Costing:** Vision analysis now estimates an editable total AUD cost per photo item; existing products use their recorded unit cost. Historical cost is included in daily, weekly, and monthly spend reporting.
+- **Quick Eat Confirmation:** Existing-product Quick Eat now shows the same successful consumption confirmation and macro summary as the photo flow.
+- **Inventory Residue Cleanup:** Tiny floating-point quantities left by consumption or recipe deduction are clamped to zero with their residual cost, preventing effectively-empty items from remaining in stock.
+- **Input Quality of Life:** Enter confirms non-form consumption and correction inputs. Search clear controls appear inside populated search fields across the main app surfaces.
+- **FORGE Progress Read:** Progress charts and history now combine local SPENCE vitals with read-only FORGE workout bodyweights and caliper body-fat readings. `FORGE_DB_PATH` supports non-standard Forge database locations.
+
 ### v1.6.0 (2026-04-05) - "Mobile Pass"
 - **Mobile Navigation:** Replaced Bootstrap hamburger with a permanent single-line icon nav on mobile. Each item shows its icon above a centred label — no toggle required. Labels abbreviated (DB, SET) to fit without overflow.
 - **Section Headers:** All page headers now stack cleanly on mobile via a 3-layer pattern (heading / search / actions). Log pages exception: heading and date picker remain inline. Weekly page exception: date picker inline with heading, rolling/mon-sun toggle drops to its own right-aligned row.

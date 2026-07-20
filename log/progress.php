@@ -4,6 +4,7 @@
  */
 require_once '../core/auth.php';
 require_once '../core/db_helper.php';
+require_once '../core/forge.php';
 $db = get_db_connection();
 
 // --- Time-Travel Logic (for tab consistency) ---
@@ -14,19 +15,21 @@ $current_date = $_GET['date'] ?? $today_str;
 $stmt = $db->query("SELECT id FROM user_profiles LIMIT 1");
 $user_id = $stmt->fetchColumn();
 
-$vitals_history = [];
+$spence_vitals_history = [];
 if ($user_id) {
     $stmt = $db->prepare("
-        SELECT weight_kg, body_fat_pct, DATETIME(recorded_at, '" . SPENCE_TIMEZONE_OFFSET . "') as local_recorded_at
+        SELECT weight_kg, body_fat_pct, DATETIME(recorded_at, '" . SPENCE_TIMEZONE_OFFSET . "') as local_recorded_at, 'Spence' AS source
         FROM user_vitals_history
         WHERE user_id = ?
         ORDER BY recorded_at ASC");
     $stmt->execute([$user_id]);
-    $vitals_history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $spence_vitals_history = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+$vitals_history = array_merge($spence_vitals_history, getForgeVitalsHistory());
+usort($vitals_history, fn($a, $b) => strcmp($a['local_recorded_at'], $b['local_recorded_at']));
 
 // Latest Vitals for modal defaults
-$latest_vitals = end($vitals_history) ?: ['weight_kg' => '', 'body_fat_pct' => ''];
+$latest_vitals = end($spence_vitals_history) ?: ['weight_kg' => '', 'body_fat_pct' => ''];
 $page_title   = 'Progress';
 $page_context = 'log';
 $extra_head   = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>';
@@ -65,14 +68,16 @@ include '../core/page_head.php';
                                     <th>Date</th>
                                     <th>Weight (kg)</th>
                                     <th>Body Fat (%)</th>
+                                    <th>Source</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach (array_reverse($vitals_history) as $v): ?>
                                 <tr>
                                     <td><?= date('j M Y, H:i', strtotime($v['local_recorded_at'])) ?></td>
-                                    <td class="fw-bold"><?= number_format($v['weight_kg'], 1) ?></td>
-                                    <td class="text-accent"><?= number_format($v['body_fat_pct'], 1) ?>%</td>
+                                    <td class="fw-bold"><?= $v['weight_kg'] !== null ? number_format($v['weight_kg'], 1) : '—' ?></td>
+                                    <td class="text-accent"><?= $v['body_fat_pct'] !== null ? number_format($v['body_fat_pct'], 1) . '%' : '—' ?></td>
+                                    <td><span class="badge <?= $v['source'] === 'Forge' ? 'bg-danger' : 'bg-secondary' ?>"><?= htmlspecialchars($v['source']) ?></span></td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -129,6 +134,7 @@ include '../core/page_head.php';
                     backgroundColor: 'rgba(0, 163, 255, 0.1)',
                     yAxisID: 'y',
                     tension: 0.3,
+                    spanGaps: true,
                     fill: true,
                     pointRadius: 4,
                     pointBackgroundColor: '#00A3FF'
@@ -140,6 +146,7 @@ include '../core/page_head.php';
                     backgroundColor: 'transparent',
                     yAxisID: 'y1',
                     tension: 0.3,
+                    spanGaps: true,
                     pointRadius: 4,
                     pointBackgroundColor: '#f44336'
                 }

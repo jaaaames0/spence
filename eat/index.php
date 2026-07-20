@@ -31,7 +31,7 @@ $query = "SELECT i.*, p.name, p.category, p.kj_per_100, p.protein_per_100, p.wei
 // All products for Quick Eat — Existing path (no stock requirement)
 $qe_products = $db->query("
     SELECT p.id, p.name, p.category, p.base_unit, p.weight_per_ea,
-           p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100
+           p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100, p.last_unit_cost
     FROM products p
     LEFT JOIN recipes r ON p.recipe_id = r.id
     WHERE p.merges_into IS NULL
@@ -86,6 +86,7 @@ include '../core/page_head.php';
                 <div class="input-group" style="max-width: 400px;">
                     <input type="text" id="tableSearch" class="form-control" placeholder="Search by name or category..." oninput="filterCards(this.value)">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <button class="search-clear" type="button" data-clear-target="tableSearch" onclick="clearSearchField('tableSearch')" title="Clear search" aria-label="Clear search"><i class="bi bi-x-lg"></i></button>
                 </div>
             </div>
             <div class="col-md-5 text-end d-flex align-items-center justify-content-end gap-3">
@@ -299,6 +300,9 @@ include '../core/page_head.php';
             document.getElementById('previewP').innerText = p.toFixed(1);
             document.getElementById('macroPreview').classList.add('visible');
         });
+        amountInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') { event.preventDefault(); submitConsumption(); }
+        });
 
         function submitConsumption() {
             const amount = parseFloat(amountInput.value);
@@ -377,7 +381,7 @@ include '../core/page_head.php';
                     <!-- State 4: Success -->
                     <div id="qeSuccessState" class="text-center py-4" style="display:none;">
                         <i class="bi bi-check-circle-fill" style="color:#4caf50; font-size:2.5rem;"></i>
-                        <div class="mt-2 fw-bold text-white">Logged to intake</div>
+                        <div class="mt-2 fw-bold text-white">Added to consumption log</div>
                         <div id="qeSuccessMacros" class="mt-2 text-muted small"></div>
                     </div>
                 </div>
@@ -403,6 +407,7 @@ include '../core/page_head.php';
                         <div class="input-group mb-3">
                             <input type="text" id="qeProductSearch" class="form-control" placeholder="Search products..." oninput="filterQeProducts(this.value)" autofocus>
                             <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <button class="search-clear" type="button" data-clear-target="qeProductSearch" onclick="clearSearchField('qeProductSearch')" title="Clear search" aria-label="Clear search"><i class="bi bi-x-lg"></i></button>
                         </div>
                         <div id="qeProductList" style="max-height:320px; overflow-y:auto;"></div>
                     </div>
@@ -415,7 +420,7 @@ include '../core/page_head.php';
                         </div>
                         <div class="mb-3">
                             <label class="form-label small fw-bold text-muted uppercase">Amount (<span id="qeAmountUnit"></span>)</label>
-                            <input type="number" step="0.001" id="qeAmount" class="form-control form-control-lg fw-bold" placeholder="0.000" oninput="updateExistingPreview()">
+                            <input type="number" step="0.001" id="qeAmount" class="form-control form-control-lg fw-bold" placeholder="0.000" oninput="updateExistingPreview()" onkeydown="if(event.key === 'Enter') { event.preventDefault(); logExistingEat(); }">
                         </div>
                         <div id="qeExistingPreview" class="p-3 rounded mb-3" style="background:#0a0a0a; border:1px solid #333; display:none;">
                             <div class="row text-center g-0">
@@ -437,12 +442,11 @@ include '../core/page_head.php';
                                 </div>
                             </div>
                         </div>
-                        <!-- Success inline -->
-                        <div id="qeExSuccessState" class="text-center py-3" style="display:none;">
-                            <i class="bi bi-check-circle-fill" style="color:#4caf50; font-size:2rem;"></i>
-                            <div class="mt-2 fw-bold text-white">Logged to intake</div>
-                            <div id="qeExSuccessMacros" class="mt-1 text-muted small"></div>
-                        </div>
+                    </div>
+                    <div id="qeExSuccessState" class="text-center py-4" style="display:none;">
+                        <i class="bi bi-check-circle-fill" style="color:#4caf50; font-size:2.5rem;"></i>
+                        <div class="mt-2 fw-bold text-white">Added to consumption log</div>
+                        <div id="qeExSuccessMacros" class="mt-2 text-muted small"></div>
                     </div>
                 </div>
                 <div class="modal-footer border-0" id="qeExistingFooter">
@@ -537,6 +541,10 @@ include '../core/page_head.php';
                     <input type="number" step="0.1" class="form-control form-control-sm text-center qe-f" id="qe-f-${i}" value="${item.fat_per_100 || 0}" oninput="updateQeTotals()" title="Fat/100g" style="width:55px;" placeholder="F">
                     <input type="number" step="0.1" class="form-control form-control-sm text-center qe-c" id="qe-c-${i}" value="${item.carbs_per_100 || 0}" oninput="updateQeTotals()" title="Carbs/100g" style="width:55px;" placeholder="C">
                     <span class="text-muted ms-1" style="font-size:0.6rem; white-space:nowrap;">per 100g</span>
+                    <div class="input-group input-group-sm ms-auto" style="width:92px; flex-shrink:0;">
+                        <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666;">$</span>
+                        <input type="number" step="0.01" min="0" class="form-control form-control-sm text-end qe-cost" id="qe-cost-${i}" value="${Number(item.estimated_cost_aud || 0).toFixed(2)}" title="Estimated total cost (AUD)">
+                    </div>
                     <div class="form-check ms-auto mb-0 d-flex align-items-center gap-1" style="white-space:nowrap;">
                         <input class="form-check-input mt-0 qe-master" type="checkbox" id="qe-master-${i}">
                         <label class="form-check-label text-muted" style="font-size:0.65rem;" for="qe-master-${i}">Add to Master</label>
@@ -547,6 +555,10 @@ include '../core/page_head.php';
         `).join('');
         updateQeTotals();
     }
+
+    document.getElementById('qeItemList').addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); logPhotoEat(); }
+    });
 
     function updateQeTotals() {
         let totalKj = 0, totalP = 0, totalF = 0, totalC = 0;
@@ -578,6 +590,7 @@ include '../core/page_head.php';
                 protein_per_100: parseFloat(document.getElementById('qe-p-' + i).value) || 0,
                 fat_per_100:    parseFloat(document.getElementById('qe-f-' + i).value) || 0,
                 carbs_per_100:  parseFloat(document.getElementById('qe-c-' + i).value) || 0,
+                estimated_cost_aud: parseFloat(document.getElementById('qe-cost-' + i).value) || 0,
                 category:       document.getElementById('qe-cat-' + i).value,
                 add_to_master:  document.getElementById('qe-master-' + i).checked
             });
@@ -596,7 +609,7 @@ include '../core/page_head.php';
                 document.getElementById('qePhotoFooter').style.display = 'none';
                 const m = res.macros;
                 document.getElementById('qeSuccessMacros').innerText =
-                    `${Math.round(m.kj)} kJ · ${parseFloat(m.protein).toFixed(1)}g P · ${parseFloat(m.fat).toFixed(1)}g F · ${parseFloat(m.carb).toFixed(1)}g C`;
+                    `${Math.round(m.kj)} kJ · ${parseFloat(m.protein).toFixed(1)}g P · ${parseFloat(m.fat).toFixed(1)}g F · ${parseFloat(m.carb).toFixed(1)}g C · $${parseFloat(m.cost).toFixed(2)}`;
                 document.getElementById('qeSuccessState').style.display = '';
             });
     }
@@ -702,7 +715,7 @@ include '../core/page_head.php';
                 document.getElementById('qeExLogBtn').style.display = 'none';
                 const m = res.macros;
                 document.getElementById('qeExSuccessMacros').innerText =
-                    `${m.kj} kJ · ${m.protein}g P · ${m.fat}g F · ${m.carb}g C`;
+                    `${m.kj} kJ · ${m.protein}g P · ${m.fat}g F · ${m.carb}g C · $${parseFloat(res.cost).toFixed(2)}`;
                 document.getElementById('qeExSuccessState').style.display = '';
             });
     }

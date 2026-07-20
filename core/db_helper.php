@@ -17,6 +17,14 @@ function get_db_connection() {
     // Auto-migrations for consumption_log
     try { $db->exec("ALTER TABLE consumption_log ADD COLUMN source TEXT DEFAULT 'inventory'"); } catch (Exception $e) {}
     try { $db->exec("ALTER TABLE consumption_log ADD COLUMN name TEXT"); } catch (Exception $e) {}
+    // Nutrition snapshots make Quick Eat entries editable without adding one-off foods to the product master.
+    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_kj_per_100 REAL"); } catch (Exception $e) {}
+    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_protein_per_100 REAL"); } catch (Exception $e) {}
+    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_fat_per_100 REAL"); } catch (Exception $e) {}
+    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_carb_per_100 REAL"); } catch (Exception $e) {}
+    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_weight_per_ea REAL"); } catch (Exception $e) {}
+    // Decimal deductions can leave an effectively-zero floating-point residue. It is not stock.
+    $db->exec("UPDATE inventory SET current_qty = 0, price_paid = 0 WHERE ABS(current_qty) < 0.0001");
     $db->exec('CREATE TABLE IF NOT EXISTS dedupe_dismissed (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id_a INTEGER NOT NULL,
@@ -51,6 +59,12 @@ function get_db_connection() {
     $ins = $db->prepare("INSERT OR IGNORE INTO spice_rack (name) VALUES (?)");
     foreach ($canonical_spices as $spice) { $ins->execute([$spice]); }
     return $db;
+}
+
+/** Clamp a post-deduction floating-point residue to an exact zero. */
+function normalizeInventoryBalance(PDO $db, int $inventoryId): void {
+    $stmt = $db->prepare("UPDATE inventory SET current_qty = 0, price_paid = 0 WHERE id = ? AND ABS(current_qty) < 0.0001");
+    $stmt->execute([$inventoryId]);
 }
 
 /**
