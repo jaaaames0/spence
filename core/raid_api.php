@@ -54,7 +54,7 @@ function getOrCreateGhostRecipe($db, $parent_id, $final_ingredients) {
 /**
  * Atomic Consumption Logger (Updated to track unit_cost at time of consumption)
  */
-function logConsumption($db, $product_id, $qty, $unit) {
+function logConsumption($db, $product_id, $qty, $unit, ?float $unitCost = null) {
     $stmt = $db->prepare("SELECT * FROM products WHERE id = ?");
     $stmt->execute([$product_id]);
     $p = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -65,7 +65,7 @@ function logConsumption($db, $product_id, $qty, $unit) {
     $kj = $macros['kj']; $protein = $macros['protein']; $fat = $macros['fat']; $carb = $macros['carb'];
 
     // Capture the current unit cost for historical accuracy in the log
-    $unit_cost = getUnitCost($db, $product_id);
+    $unit_cost = $unitCost ?? getUnitCost($db, $product_id);
 
     $stmt = $db->prepare("INSERT INTO consumption_log (product_id, amount, unit, kj, protein, fat, carb, unit_cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->execute([$product_id, $qty, $effective_unit, $kj, $protein, $fat, $carb, $unit_cost]);
@@ -190,26 +190,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($eat_now > $total_portions + 0.001) throw new Exception("Cannot eat more than you cooked.");
 
             // 4. Deduct Ingredients from Inventory
+            $batch_ingredient_cost = 0.0;
+            $ingredient_deductions = [];
             foreach ($final_ingredients as $ing) {
-                $required = $ing['actual_used'];
-                $stmt = $db->prepare("SELECT id, current_qty, price_paid FROM inventory WHERE product_id = ? AND current_qty > 0 ORDER BY current_qty DESC");
-                $stmt->execute([$ing['product_id']]);
-                $inventory_rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-                $unit_cost = getUnitCost($db, $ing['product_id']);
-                $remaining = $required;
-                foreach ($inventory_rows as $row) {
-                    if ($remaining <= 0) break;
-                    $deduct = min($row['current_qty'], $remaining);
-                    $price_reduction = $unit_cost * $deduct;
-                    $db->prepare("UPDATE inventory SET current_qty = current_qty - ?, price_paid = price_paid - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                       ->execute([$deduct, $price_reduction, $row['id']]);
-                    normalizeInventoryBalance($db, (int)$row['id']);
-                    $remaining -= $deduct;
-                }
-                // Tolerate tiny residual (rounding / "use all" edge cases)
-                if ($remaining > 0.010) throw new Exception("Insufficient stock for ingredient.");
+                $deduction = deductInventoryLots($db, (int)$ing['product_id'], (float)$ing['actual_used']);
+                $batch_ingredient_cost += $deduction['cost'];
+                $ingredient_deductions[$ing['product_id']]['quantity'] = ($ingredient_deductions[$ing['product_id']]['quantity'] ?? 0) + $deduction['quantity'];
+                $ingredient_deductions[$ing['product_id']]['cost'] = ($ingredient_deductions[$ing['product_id']]['cost'] ?? 0) + $deduction['cost'];
             }
+
+            // Preserve the last observed cost of each raw product, then use the exact batch cost for the cooked product.
+            foreach ($ingredient_deductions as $ingredient_product_id => $deduction) {
+                if ($deduction['quantity'] > 0) {
+                    $db->prepare("UPDATE products SET last_unit_cost = ? WHERE id = ?")
+                       ->execute([$deduction['cost'] / $deduction['quantity'], $ingredient_product_id]);
+                }
+            }
+            $cost_per_portion = $total_portions > 0 ? $batch_ingredient_cost / $total_portions : 0;
+            $db->prepare("UPDATE products SET last_unit_cost = ? WHERE id = ?")
+               ->execute([$cost_per_portion, $product_id]);
 
             // 5. Handle Output (Leftovers to Inventory, Eat Now to Log)
             $leftover = $total_portions - $eat_now;
@@ -218,7 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             if ($eat_now > 0.001) {
-                logConsumption($db, $product_id, $eat_now, 'ea');
+                logConsumption($db, $product_id, $eat_now, 'ea', $cost_per_portion);
             }
 
             // 6. Increment spice use counters for this recipe (resolve through ghost → parent)

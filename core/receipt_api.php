@@ -7,13 +7,13 @@
 ob_start();
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
-require_once __DIR__ . '/matching.php';
+require_once __DIR__ . '/receipt_ingest.php';
 ob_clean();
 header('Content-Type: application/json');
 
 set_time_limit(120); // Vision calls can take up to 60s on a busy receipt
 
-$_key_file = __DIR__ . '/openrouter.env';
+$_key_file = '/srv/secrets/openrouter.env';
 $api_key = file_exists($_key_file)
     ? trim(file_get_contents($_key_file))
     : (getenv('OPENROUTER_API_KEY') ?: '');
@@ -72,6 +72,7 @@ try {
         . "     - Example: 'Burger Slices 200g' -> product='Burger Slices', unit='kg', amount=0.200, weight_per_ea=1.0.\n"
         . "     - Example: 'Olive Oil 750ml' -> product='Olive Oil', unit='L', amount=0.750, weight_per_ea=1.0.\n\n"
         . "Category note: Use 'Spice/Herb' for any dried spices, herbs, seasoning blends, or condiment sachets.\n\n"
+        . "Expiry protocol: Only track short-life fresh food. For fresh refrigerated meat/seafood, milk/yogurt/soft cheese, fresh bread/bakery, and fresh fruit/vegetables: if a clear date is visible on the image, return expiry_kind='label' and expiry_date as YYYY-MM-DD. Otherwise return expiry_kind='estimated' with a conservative estimated_shelf_life_days of 1–60 and expiry_date=''. Return expiry_kind='none', expiry_date='', and estimated_shelf_life_days=0 for frozen, canned, dried, jarred, shelf-stable, coffee, sugar, syrup, sauces, cereal, pasta, oil, and all products likely to last over 60 days.\n\n"
         . "Return ONLY a valid JSON array of objects.";
 
     $payload = json_encode([
@@ -104,8 +105,11 @@ try {
                             'protein_per_100' => ['type' => 'number'],
                             'fat_per_100'     => ['type' => 'number'],
                             'carbs_per_100'   => ['type' => 'number'],
+                            'expiry_kind'     => ['type' => 'string', 'enum' => ['label', 'estimated', 'none']],
+                            'expiry_date'     => ['type' => 'string'],
+                            'estimated_shelf_life_days' => ['type' => 'integer'],
                         ],
-                        'required'             => ['product', 'amount', 'unit', 'price', 'weight_per_ea', 'location', 'category', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100'],
+                        'required'             => ['product', 'amount', 'unit', 'price', 'weight_per_ea', 'location', 'category', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100', 'expiry_kind', 'expiry_date', 'estimated_shelf_life_days'],
                         'additionalProperties' => false
                     ]
                 ]
@@ -141,7 +145,7 @@ try {
        ->execute([$targetPath, json_encode($items)]);
     $job_id = (int)$db->lastInsertId();
 
-    $result = runBridgeIngest($db, $items, $job_id);
+    $result = ingestReceiptItems($db, $items, $job_id);
 
     echo json_encode([
         'status'           => 'success',
@@ -151,107 +155,4 @@ try {
 
 } catch (Exception $e) {
     echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
-}
-
-/**
- * Inline equivalent of bridge_ingest.php — runs inside the same HTTP request.
- * Mirrors the same unit-normalisation logic added in the Phase 2 audit fix.
- */
-function runBridgeIngest(PDO $db, array $items, int $job_id): array {
-    // Snapshot max product ID before we create anything new
-    $maxIdBefore = (int)($db->query("SELECT MAX(id) FROM products")->fetchColumn() ?: 0);
-    $ingestedIds = [];
-
-    foreach ($items as $item) {
-        try {
-            $db->beginTransaction();
-            $cleanName = trim($item['product']);
-
-            // Spice/Herb items go to the spice_rack, not inventory
-            if (($item['category'] ?? '') === 'Spice/Herb') {
-                $db->prepare("INSERT OR IGNORE INTO spice_rack (name) VALUES (?)")->execute([$cleanName]);
-                // If it was already there but unstocked, restock it and reset counters
-                $db->prepare("UPDATE spice_rack SET is_stocked = 1, uses_since_restock = 0, restock_flagged = 0, last_restocked_at = CURRENT_TIMESTAMP WHERE name = ? COLLATE NOCASE")
-                   ->execute([$cleanName]);
-                $db->commit();
-                continue;
-            }
-
-            $stmt = $db->prepare("SELECT id, merges_into, is_dropped FROM products WHERE LOWER(name) = LOWER(?) LIMIT 1");
-            $stmt->execute([$cleanName]);
-            $product = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if ($product && $product['is_dropped']) {
-                $db->commit();
-                continue;
-            }
-
-            if (!$product) {
-                $db->prepare("INSERT INTO products (name, category, base_unit, kj_per_100, protein_per_100, fat_per_100, carb_per_100, weight_per_ea) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-                   ->execute([$cleanName, $item['category'], $item['unit'], $item['kj_per_100'], $item['protein_per_100'], $item['fat_per_100'], $item['carbs_per_100'], $item['weight_per_ea']]);
-                $productId = (int)$db->lastInsertId();
-            } else {
-                $productId = (int)($product['merges_into'] ?: $product['id']);
-            }
-
-            // Normalise incoming amount to the product's canonical unit
-            $stmt = $db->prepare("SELECT base_unit, weight_per_ea FROM products WHERE id = ?");
-            $stmt->execute([$productId]);
-            $meta = $stmt->fetch(PDO::FETCH_ASSOC);
-            $canonicalUnit = $meta ? $meta['base_unit'] : $item['unit'];
-            $wpe           = (float)($meta['weight_per_ea'] ?? 0);
-
-            $incomingAmt = $item['amount'];
-            if ($item['unit'] !== $canonicalUnit) {
-                if ($item['unit'] !== 'ea' && $canonicalUnit === 'ea' && $wpe > 0) {
-                    $incomingAmt = $item['amount'] / $wpe;
-                } elseif ($item['unit'] === 'ea' && $canonicalUnit !== 'ea' && $wpe > 0) {
-                    $incomingAmt = $item['amount'] * $wpe;
-                }
-            }
-
-            // Merge into existing inventory row or create new
-            $stmt = $db->prepare("SELECT id, current_qty, price_paid FROM inventory WHERE product_id = ? AND location = ? LIMIT 1");
-            $stmt->execute([$productId, $item['location']]);
-            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if ($existing) {
-                $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, unit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                   ->execute([$existing['current_qty'] + $incomingAmt, $existing['price_paid'] + $item['price'], $canonicalUnit, $existing['id']]);
-            } else {
-                $db->prepare("INSERT INTO inventory (product_id, current_qty, unit, price_paid, location) VALUES (?, ?, ?, ?, ?)")
-                   ->execute([$productId, $incomingAmt, $canonicalUnit, $item['price'], $item['location']]);
-            }
-
-            $db->commit();
-            $ingestedIds[] = $productId;
-
-        } catch (Exception $e) {
-            if ($db->inTransaction()) $db->rollBack();
-            // Continue with remaining items — one bad row shouldn't abort the whole receipt
-        }
-    }
-
-    // Deduplicate match detection (only against pre-existing products)
-    $potentialMerges = [];
-    foreach (array_unique($ingestedIds) as $pid) {
-        foreach (findPotentialMatches($db, $pid) as $m) {
-            $other = ($m['p1']['id'] == $pid) ? $m['p2'] : $m['p1'];
-            if ((int)$other['id'] <= $maxIdBefore) {
-                $potentialMerges[] = [
-                    'source_id'   => $pid,
-                    'source_name' => ($m['p1']['id'] == $pid) ? $m['p1']['name'] : $m['p2']['name'],
-                    'target_id'   => $other['id'],
-                    'target_name' => $other['name'],
-                    'reason'      => $m['distance'],
-                ];
-            }
-        }
-    }
-
-    // Mark job processed (same final state as bridge_ingest.php produces)
-    $db->prepare("UPDATE jobs SET status = 'processed', result_json = ?, message = 'Successfully ingested all items.' WHERE id = ?")
-       ->execute([json_encode(['items' => $items, 'potential_merges' => $potentialMerges]), $job_id]);
-
-    return ['potential_merges' => $potentialMerges];
 }

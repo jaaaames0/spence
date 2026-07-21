@@ -246,7 +246,7 @@ include '../core/page_head.php';
             document.getElementById('unitLabel').innerText = item.base_unit;
             document.getElementById('availableQty').innerText = parseFloat(item.current_qty).toFixed(3);
             amountInput.value = '';
-            document.getElementById('macroPreview').classList.remove('visible');
+            resetMacroPreview();
             
             const smallUnit = item.base_unit === 'L' ? 'ml' : (item.base_unit === 'kg' ? 'g' : item.base_unit);
             document.querySelectorAll('.btn-unit-small').forEach(el => el.innerText = smallUnit);
@@ -275,8 +275,14 @@ include '../core/page_head.php';
         }
 
         function clearAmount() {
-            amountInput.value = (0).toFixed(3);
-            amountInput.dispatchEvent(new Event('input'));
+            amountInput.value = '';
+            resetMacroPreview();
+        }
+
+        function resetMacroPreview() {
+            document.getElementById('previewKj').innerText = '0';
+            document.getElementById('previewP').innerText = '0';
+            document.getElementById('macroPreview').classList.remove('visible');
         }
 
         function setPercent(p) {
@@ -288,7 +294,7 @@ include '../core/page_head.php';
         amountInput.addEventListener('input', () => {
             const amount = parseFloat(amountInput.value);
             if (!amount || !currentItem || amount <= 0) {
-                document.getElementById('macroPreview').classList.remove('visible');
+                resetMacroPreview();
                 return;
             }
             const weight = (currentItem.base_unit === 'ea') ? (amount * currentItem.weight_per_ea) : amount;
@@ -302,6 +308,11 @@ include '../core/page_head.php';
         });
         amountInput.addEventListener('keydown', event => {
             if (event.key === 'Enter') { event.preventDefault(); submitConsumption(); }
+        });
+        document.getElementById('consumeModal').addEventListener('hidden.bs.modal', () => {
+            amountInput.value = '';
+            resetMacroPreview();
+            currentItem = null;
         });
 
         function submitConsumption() {

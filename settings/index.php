@@ -4,28 +4,50 @@
  */
 require_once '../core/auth.php';
 require_once '../core/db_helper.php';
+require_once '../core/energy_calibration.php';
+require_once '../core/forge.php';
 $db = get_db_connection();
+$energyCalibration = getEnergyCalibration($db);
+$energyPrefs = $db->query('SELECT * FROM energy_preferences WHERE id = 1')->fetch(PDO::FETCH_ASSOC) ?: ['use_calibrated_targets' => 0, 'goal_adjustment_kj' => 0, 'training_adjustment_kj' => 0];
+$forgeActivity = getForgeActivityRecommendation();
 
 $stmt = $db->query("SELECT * FROM user_profiles LIMIT 1");
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 $has_profile = ($user !== false);
 
 $vitals = null; $goals = null; $tdee_kj = 0; $lbm_kg = 0;
+$activePlan = null;
+$planMode = 'Custom';
 
 if ($has_profile) {
     $stmt = $db->prepare("SELECT * FROM user_vitals_history WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 1");
     $stmt->execute([$user['id']]);
     $vitals = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    $stmt = $db->prepare("SELECT weight_kg, body_fat_pct, DATETIME(recorded_at, '" . SPENCE_TIMEZONE_OFFSET . "') AS local_recorded_at, 'Spence' AS source FROM user_vitals_history WHERE user_id = ?");
+    $stmt->execute([$user['id']]);
+    $combinedVitals = array_merge($stmt->fetchAll(PDO::FETCH_ASSOC), getForgeVitalsHistory());
+    usort($combinedVitals, fn($a, $b) => strcmp($a['local_recorded_at'], $b['local_recorded_at']));
+    $latestWeight = $latestBodyFat = null;
+    foreach (array_reverse($combinedVitals) as $reading) {
+        if ($latestWeight === null && $reading['weight_kg'] !== null) $latestWeight = (float)$reading['weight_kg'];
+        if ($latestBodyFat === null && $reading['body_fat_pct'] !== null) $latestBodyFat = (float)$reading['body_fat_pct'];
+    }
+    $vitals['weight_kg'] = $latestWeight ?? $vitals['weight_kg'];
+    $vitals['body_fat_pct'] = $latestBodyFat ?? $vitals['body_fat_pct'];
+
     $stmt = $db->prepare("SELECT * FROM user_goals_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
     $stmt->execute([$user['id']]);
     $goals = $stmt->fetch(PDO::FETCH_ASSOC);
+    $planMode = $goals['goal_type'] ?? 'Custom';
+    if ($planMode === 'Weight Loss') $planMode = 'Fat Loss';
 
     if ($vitals) {
         $lbm_kg = $vitals['weight_kg'] * (1 - ($vitals['body_fat_pct'] / 100));
         $bmr = 370 + (21.6 * $lbm_kg);
         $tdee_kj = ($bmr * $user['activity_rate']) * 4.184;
     }
+    $activePlan = getActiveEnergyPlan($db, date('Y-m-d'));
 }
 $page_title   = 'User Profile';
 $page_context = 'settings';
@@ -93,57 +115,64 @@ include '../core/page_head.php';
                                 <div class="stat-value"><?= number_format($lbm_kg, 1) ?><span class="fs-6 ms-1 text-muted">kg</span></div>
                             </div>
                             <div class="col-6">
-                                <div class="stat-label uppercase">TDEE</div>
-                                <div class="stat-value"><?= number_format($tdee_kj) ?><span class="fs-6 ms-1 text-muted">kJ</span></div>
+                                <div class="stat-label uppercase">Maintenance</div>
+                                <div class="stat-value color-kj"><?= number_format($activePlan['maintenance']) ?><span class="fs-6 ms-1 text-muted">kJ</span></div>
+                                <div class="small text-muted"><?= $activePlan['calibrated'] ? 'calibrated' : 'formula fallback' ?></div>
                             </div>
                             <div class="col-12 mt-3 pt-2 border-top border-secondary">
                                 <div class="stat-label uppercase">Activity Rate</div>
                                 <select class="form-select form-select-sm mt-1" onchange="updateActivity(this.value)">
-                                    <option value="1.2" <?= $user['activity_rate'] == 1.2 ? 'selected' : '' ?>>Sedentary (1.2x)</option>
-                                    <option value="1.375" <?= $user['activity_rate'] == 1.375 ? 'selected' : '' ?>>Lightly Active (1.375x)</option>
-                                    <option value="1.55" <?= $user['activity_rate'] == 1.55 ? 'selected' : '' ?>>Moderately Active (1.55x)</option>
-                                    <option value="1.725" <?= $user['activity_rate'] == 1.725 ? 'selected' : '' ?>>Very Active (1.725x)</option>
-                                    <option value="1.9" <?= $user['activity_rate'] == 1.9 ? 'selected' : '' ?>>Extra Active (1.9x)</option>
+                                    <?php $displayActivityRate = $user['activity_rate_override'] ? $user['activity_rate'] : ($forgeActivity['rate'] ?? $user['activity_rate']); ?>
+                                    <option value="1.2" <?= $displayActivityRate == 1.2 ? 'selected' : '' ?>>Sedentary (1.2x)</option>
+                                    <option value="1.375" <?= $displayActivityRate == 1.375 ? 'selected' : '' ?>>Lightly Active (1.375x)</option>
+                                    <option value="1.55" <?= $displayActivityRate == 1.55 ? 'selected' : '' ?>>Moderately Active (1.55x)</option>
+                                    <option value="1.725" <?= $displayActivityRate == 1.725 ? 'selected' : '' ?>>Very Active (1.725x)</option>
+                                    <option value="1.9" <?= $displayActivityRate == 1.9 ? 'selected' : '' ?>>Extra Active (1.9x)</option>
                                 </select>
+                                <?php if ($forgeActivity): ?><div class="small text-muted mt-1"><?= $user['activity_rate_override'] ? 'Manual override · ' : 'Forge recommendation · ' ?><?= number_format($forgeActivity['workouts_per_week'], 1) ?> workouts/week (28d)</div><?php endif; ?>
                             </div>
+                        </div>
+                        <div class="mt-4 pt-3 border-top border-secondary">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2"><div><div class="stat-label uppercase">Energy Calibration</div><div class="small text-muted">Historical intake and weight trend.</div></div><span class="badge <?= $energyCalibration['confidence'] === 'high' ? 'bg-success' : ($energyCalibration['confidence'] === 'medium' ? 'bg-warning text-dark' : 'bg-secondary') ?> text-uppercase"><?= htmlspecialchars($energyCalibration['confidence']) ?></span></div>
+                            <?php if ($energyCalibration['tdee'] !== null): ?><div class="small mb-2"><strong class="color-kj"><?= number_format($energyCalibration['tdee']) ?> kJ</strong> observed maintenance · <?= round($energyCalibration['coverage'] * 100) ?>% coverage · <?= htmlspecialchars($energyCalibration['regime']['label']) ?> phase<?= $energyCalibration['regime']['active_start'] ? ' since ' . date('j M', strtotime($energyCalibration['regime']['active_start'])) : '' ?></div><?php else: ?><div class="small text-muted mb-2">Needs more matched weight and intake history.</div><?php endif; ?>
+                            <label class="form-check-label small"><input class="form-check-input me-2" type="checkbox" <?= $energyPrefs['use_calibrated_targets'] ? 'checked' : '' ?> <?= $energyCalibration['confidence'] !== 'high' ? 'disabled' : '' ?> onchange="toggleCalibratedMaintenance(this.checked)">Use high-confidence calibrated maintenance</label>
                         </div>
                     </div>
                 </div>
 
                 <!-- Goals Card -->
                 <div class="col-lg-8">
-                    <div class="card p-4">
+                    <div class="card p-4 h-100">
                         <div class="d-flex justify-content-between align-items-start mb-4">
                             <div>
-                                <h4 class="fw-black uppercase mb-0">Daily Performance Targets</h4>
-                                <div class="text-muted small uppercase fw-bold">Active Mode: <span class="text-accent"><?= htmlspecialchars($goals['goal_type']) ?></span></div>
+                                <h4 class="fw-black uppercase mb-0">Active Nutrition Plan</h4>
+                                <div class="text-muted small uppercase fw-bold">Plan mode: <span class="text-accent"><?= htmlspecialchars($planMode) ?></span></div>
                             </div>
-                            <button class="btn btn-sm btn-outline-secondary px-3" onclick="openOverrideModal()">ADJUST PLAN</button>
                         </div>
 
                         <div class="row g-3 mb-4">
                             <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Energy</div>
-                                    <div class="stat-value" style="color: #ff9800;"><?= number_format($goals['target_kj']) ?> <small class="fs-6 text-muted">kJ</small></div>
+                                    <div class="stat-value" style="color: #ff9800;"><?= number_format($activePlan['target_kj']) ?> <small class="fs-6 text-muted">kJ</small></div>
                                 </div>
                             </div>
                             <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Protein</div>
-                                    <div class="stat-value color-p"><?= number_format($goals['target_protein_g']) ?> <small class="fs-6 text-muted">g</small></div>
+                                    <div class="stat-value color-p"><?= number_format($activePlan['protein']) ?> <small class="fs-6 text-muted">g</small></div>
                                 </div>
                             </div>
                             <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Fat</div>
-                                    <div class="stat-value color-f"><?= number_format($goals['target_fat_g']) ?> <small class="fs-6 text-muted">g</small></div>
+                                    <div class="stat-value color-f"><?= number_format($activePlan['fat']) ?> <small class="fs-6 text-muted">g</small></div>
                                 </div>
                             </div>
                             <div class="col-6 col-md-3">
                                 <div class="p-3 border border-secondary rounded">
                                     <div class="stat-label uppercase">Carbs</div>
-                                    <div class="stat-value color-c"><?= number_format($goals['target_carb_g']) ?> <small class="fs-6 text-muted">g</small></div>
+                                    <div class="stat-value color-c"><?= number_format($activePlan['carb']) ?> <small class="fs-6 text-muted">g</small></div>
                                 </div>
                             </div>
                         </div>
@@ -154,14 +183,38 @@ include '../core/page_head.php';
                                 <div class="stat-value text-success">$<?= number_format($goals['cost_limit_daily'], 2) ?><span class="fs-6 ms-1 text-muted">Daily limit</span></div>
                             </div>
                             <div class="col text-end">
-                                <div class="stat-label uppercase">Plan Variance</div>
-                                <div class="stat-value <?= $goals['target_kj'] > $tdee_kj ? 'text-danger' : 'text-primary' ?>">
-                                    <?= ($goals['target_kj'] > $tdee_kj ? '+' : '') . number_format($goals['target_kj'] - $tdee_kj) ?> <small class="fs-6">kJ</small>
+                                <div class="stat-label uppercase">Daily Energy Change</div>
+                                <div class="stat-value <?= $activePlan['goal_adjustment'] > 0 ? 'text-danger' : 'text-primary' ?>">
+                                    <?= ($activePlan['goal_adjustment'] > 0 ? '+' : '') . number_format($activePlan['goal_adjustment']) ?> <small class="fs-6">kJ</small>
                                 </div>
                             </div>
                         </div>
+                        <form id="activePlanForm" onsubmit="submitEnergyPlan(event)" class="row g-3 mt-2 pt-3 border-top border-secondary">
+                            <div class="col-md-6">
+                                <div class="row g-3">
+                                    <div class="col-6"><label class="stat-label uppercase">Plan Mode</label><select class="form-select form-select-sm" name="goal_type" id="goalModeSelect" onchange="applyPlanRegime(this.value)"><option value="Fat Loss" <?= $planMode === 'Fat Loss' ? 'selected' : '' ?>>Fat Loss</option><option value="Maintenance" <?= $planMode === 'Maintenance' ? 'selected' : '' ?>>Maintenance</option><option value="Lean Gain" <?= $planMode === 'Lean Gain' ? 'selected' : '' ?>>Lean Gain</option><option value="High Gain" <?= $planMode === 'High Gain' ? 'selected' : '' ?>>High Gain</option><option value="Dirty Bulk" <?= $planMode === 'Dirty Bulk' ? 'selected' : '' ?>>Dirty Bulk</option><option value="Custom" <?= $planMode === 'Custom' ? 'selected' : '' ?>>Custom</option></select></div>
+                                    <div class="col-6"><label class="stat-label uppercase">Daily Energy Change</label><input class="form-control form-control-sm" id="planGoalAdjustment" name="goal_adjustment_kj" type="number" value="<?= htmlspecialchars($energyPrefs['goal_adjustment_kj']) ?>" oninput="recalcPlanMacros()"></div>
+                                    <div class="col-6"><label class="stat-label uppercase">Training-day Addition</label><input class="form-control form-control-sm" name="training_adjustment_kj" type="number" value="<?= htmlspecialchars($energyPrefs['training_adjustment_kj']) ?>"></div>
+                                    <div class="col-6"><label class="stat-label uppercase">Weekly Food Budget</label><input class="form-control form-control-sm" name="weekly_budget" type="number" step="0.01" value="<?= htmlspecialchars($user['weekly_budget']) ?>"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="d-flex flex-column gap-2">
+                                    <div><div class="d-flex justify-content-between"><span class="small">Protein</span><strong id="pGram" class="color-p"></strong></div><input type="range" class="form-range" id="pRatio" min="10" max="60" oninput="balancePlanSliders('p')"></div>
+                                    <div><div class="d-flex justify-content-between"><span class="small">Fat</span><strong id="fGram" class="color-f"></strong></div><input type="range" class="form-range" id="fRatio" min="10" max="60" oninput="balancePlanSliders('f')"></div>
+                                    <div><div class="d-flex justify-content-between"><span class="small">Carbs</span><strong id="cGram" class="color-c"></strong></div><input type="range" class="form-range" id="cRatio" min="10" max="70" oninput="balancePlanSliders('c')"></div>
+                                </div>
+                            </div>
+                            <input type="hidden" name="target_kj" id="planTargetKj"><input type="hidden" name="p" id="finalP"><input type="hidden" name="f" id="finalF"><input type="hidden" name="c" id="finalC"><input type="hidden" name="enabled" value="<?= $energyPrefs['use_calibrated_targets'] ? '1' : '0' ?>">
+                            <div class="col-12"><button class="btn btn-sm btn-outline-secondary w-100 fw-bold">SAVE ACTIVE PLAN</button></div>
+                        </form>
                     </div>
                 </div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-4 p-3 border border-secondary rounded" style="background:#171717;">
+                <div class="me-auto"><div class="stat-label uppercase">Data Export</div><div class="small text-muted">Download a complete JSON backup or individual CSV datasets.</div></div>
+                <a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=backup">JSON BACKUP</a>
+                <div class="btn-group"><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=inventory&amp;format=csv">INVENTORY CSV</a><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=consumption&amp;format=csv">LOG CSV</a><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=recipes&amp;format=csv">RECIPES CSV</a><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=vitals&amp;format=csv">VITALS CSV</a></div>
             </div>
         <?php endif; ?>
     </div>
@@ -195,7 +248,7 @@ include '../core/page_head.php';
                             <div class="col-6 mb-3"><label class="stat-label uppercase">Body Fat %</label><input type="number" step="0.1" name="bf" class="form-control" required></div>
                         </div>
                         <div class="mb-3"><label class="stat-label uppercase">Goal Mode</label>
-                            <select name="goal" class="form-select"><option>Maintenance</option><option>Weight Loss</option><option>Lean Gain</option><option>Dirty Bulk</option></select>
+                            <select name="goal" class="form-select"><option>Fat Loss</option><option>Maintenance</option><option>Lean Gain</option><option>High Gain</option><option>Dirty Bulk</option></select>
                         </div>
                         <div class="mb-3"><label class="stat-label uppercase">Weekly Fuel Budget ($)</label><input type="number" name="budget" class="form-control" value="150" required></div>
                     </div>
@@ -205,54 +258,26 @@ include '../core/page_head.php';
         </div>
     </div>
 
-    <!-- Adjust Plan Modal (Smart Calculator) -->
+    <!-- Active Energy Plan Modal -->
     <div class="modal fade" id="overrideModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <form id="overrideForm" onsubmit="submitOverride(event)">
+                <form id="overrideForm" onsubmit="submitEnergyPlan(event)">
                     <div class="modal-header border-secondary"><h5 class="modal-title fw-black uppercase">Plan Adjustments</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
                     <div class="modal-body">
-                        <input type="hidden" name="user_id" value="<?= $user['id'] ?? '' ?>">
-                        <div class="row g-4">
-                            <div class="col-md-6">
-                                <div class="mb-3"><label class="stat-label uppercase">Target Energy (kJ)</label><input type="number" name="kj" id="calcKJ" class="form-control form-control-lg" value="<?= $goals['target_kj'] ?? '' ?>" oninput="recalcMacros()" required></div>
-                                <div class="mb-3">
-                                    <div class="stat-label uppercase">Daily Variance</div>
-                                    <div id="varianceDisplay" class="fw-bold fs-4">0 kJ</div>
-                                    <div class="text-muted small uppercase fw-bold" id="weeklyWeightDisplay">Est. ±0.0kg/week</div>
-                                </div>
-                                <div class="mb-3"><label class="stat-label uppercase">Weekly Budget Ceiling ($)</label><input type="number" step="0.01" id="weeklyBudgetInput" class="form-control" value="<?= number_format($goals['cost_limit_daily'] * 7, 2) ?>" required></div>
-                                <div class="mb-3"><label class="stat-label uppercase">Plan Mode</label>
-                                    <select name="goal_type" id="goalModeSelect" class="form-select" onchange="applyMode(this.value)">
-                                        <option value="Maintenance">Maintenance</option><option value="Weight Loss">Weight Loss</option><option value="Lean Gain">Lean Gain</option><option value="Dirty Bulk">Dirty Bulk</option><option value="Custom" selected>Custom Override</option>
-                                    </select>
-                                </div>
+                        <div class="small text-muted mb-3">Maintenance is <?= number_format($activePlan['maintenance']) ?> kJ/day from the <?= $activePlan['calibrated'] ? 'calibrated' : 'formula fallback' ?> model. These adjustments define the single active plan used across SPENCE.</div>
+                        <div class="row g-3">
+                            <div class="col-md-6"><label class="stat-label uppercase">Regime</label><select class="form-select form-select-lg" name="goal_type" id="goalModeSelect" onchange="applyPlanRegime(this.value)"><option value="Maintenance">Maintenance</option><option value="Weight Loss">Cut</option><option value="Lean Gain">Lean Gain</option><option value="Dirty Bulk">Dirty Bulk</option><option value="Custom">Custom</option></select></div>
+                            <div class="col-md-6"><label class="stat-label uppercase">Goal adjustment (kJ/day)</label><input class="form-control form-control-lg" id="planGoalAdjustment" name="goal_adjustment_kj" type="number" value="<?= htmlspecialchars($energyPrefs['goal_adjustment_kj']) ?>" oninput="recalcPlanMacros()"><div class="small text-muted mt-1">Negative for loss, positive for gain.</div></div>
+                            <div class="col-md-6"><label class="stat-label uppercase">Training-day adjustment (kJ)</label><input class="form-control form-control-lg" name="training_adjustment_kj" type="number" value="<?= htmlspecialchars($energyPrefs['training_adjustment_kj']) ?>"><div class="small text-muted mt-1">Applied only to Forge workout days.</div></div>
+                            <div class="col-md-6"><label class="stat-label uppercase">Weekly budget ($)</label><input class="form-control form-control-lg" name="weekly_budget" type="number" step="0.01" value="<?= htmlspecialchars($user['weekly_budget']) ?>"></div>
+                            <div class="col-12 border-top border-secondary pt-3"><div class="stat-label uppercase mb-2">Macro Profile</div><div class="small text-muted mb-3">Default: 1g protein/lb lean mass; remaining energy split 1:2 between fat and carbs.</div>
+                                <div class="mb-3"><div class="d-flex justify-content-between"><span class="small">Protein</span><strong id="pGram" class="color-p"></strong></div><input type="range" class="form-range" id="pRatio" min="10" max="60" oninput="balancePlanSliders('p')"></div>
+                                <div class="mb-3"><div class="d-flex justify-content-between"><span class="small">Fat</span><strong id="fGram" class="color-f"></strong></div><input type="range" class="form-range" id="fRatio" min="10" max="60" oninput="balancePlanSliders('f')"></div>
+                                <div class="mb-1"><div class="d-flex justify-content-between"><span class="small">Carbs</span><strong id="cGram" class="color-c"></strong></div><input type="range" class="form-range" id="cRatio" min="10" max="70" oninput="balancePlanSliders('c')"></div>
+                                <input type="hidden" name="target_kj" id="planTargetKj"><input type="hidden" name="p" id="finalP"><input type="hidden" name="f" id="finalF"><input type="hidden" name="c" id="finalC">
                             </div>
-                            <div class="col-md-6 border-start border-secondary">
-                                <div class="stat-label uppercase mb-3 text-muted">Macro Ratio Split</div>
-                                
-                                <div class="mb-4">
-                                    <div class="d-flex justify-content-between"><label class="stat-label uppercase">Protein</label><span id="pGram" class="fw-bold color-p">0g</span></div>
-                                    <input type="range" class="form-range ratio-slider" id="pRatio" value="30" min="10" max="60" oninput="balanceSliders('p')">
-                                    <div class="text-end small opacity-50" id="pPct">30%</div>
-                                </div>
-                                
-                                <div class="mb-4">
-                                    <div class="d-flex justify-content-between"><label class="stat-label uppercase">Fat</label><span id="fGram" class="fw-bold color-f">0g</span></div>
-                                    <input type="range" class="form-range ratio-slider" id="fRatio" value="30" min="10" max="60" oninput="balanceSliders('f')">
-                                    <div class="text-end small opacity-50" id="fPct">30%</div>
-                                </div>
-                                
-                                <div class="mb-4">
-                                    <div class="d-flex justify-content-between"><label class="stat-label uppercase">Carbs</label><span id="cGram" class="fw-bold color-c">0g</span></div>
-                                    <input type="range" class="form-range ratio-slider" id="cRatio" value="40" min="10" max="70" oninput="balanceSliders('c')">
-                                    <div class="text-end small opacity-50" id="cPct">40%</div>
-                                </div>
-
-                                <input type="hidden" name="p" id="finalP">
-                                <input type="hidden" name="f" id="finalF">
-                                <input type="hidden" name="c" id="finalC">
-                            </div>
+                            <div class="col-12"><label class="form-check-label small"><input class="form-check-input me-2" type="checkbox" name="enabled" value="1" <?= $energyPrefs['use_calibrated_targets'] ? 'checked' : '' ?> <?= $energyCalibration['confidence'] !== 'high' ? 'disabled' : '' ?>>Use high-confidence calibrated maintenance</label></div>
                         </div>
                     </div>
                     <div class="modal-footer border-0"><button type="submit" class="btn btn-primary w-100 fw-bold uppercase">LOCK IN PLAN</button></div>
@@ -285,8 +310,8 @@ include '../core/page_head.php';
         const KG_FAT_KJ = 37000;
 
         function openOverrideModal() { 
-            new bootstrap.Modal(document.getElementById('overrideModal')).show(); 
-            recalcMacros();
+            applyPlanRegime('Custom');
+            new bootstrap.Modal(document.getElementById('overrideModal')).show();
         }
         function openWeighInModal() { new bootstrap.Modal(document.getElementById('weighInModal')).show(); }
 
@@ -369,6 +394,78 @@ include '../core/page_head.php';
             data.append('activity', val);
             fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status === 'success') location.reload(); });
         }
+
+        function saveEnergyPreferences(e) {
+            e.preventDefault();
+            const data = new FormData(e.target);
+            data.append('action', 'save_energy_preferences');
+            const enabledInput = e.target.querySelector('[name="enabled"]');
+            data.set('enabled', enabledInput ? (enabledInput.type === 'checkbox' ? (enabledInput.checked ? '1' : '0') : enabledInput.value) : '0');
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+                if (res.status === 'success') location.reload(); else alert(res.message || 'Could not save energy settings.');
+            });
+        }
+
+        function submitEnergyPlan(e) {
+            e.preventDefault();
+            const data = new FormData(e.target);
+            data.append('action', 'save_active_plan');
+            const enabledInput = e.target.querySelector('[name="enabled"]');
+            data.set('enabled', enabledInput ? (enabledInput.type === 'checkbox' ? (enabledInput.checked ? '1' : '0') : enabledInput.value) : '0');
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+                if (res.status === 'success') location.reload(); else alert(res.message || 'Could not save energy plan.');
+            });
+        }
+
+        function toggleCalibratedMaintenance(enabled) {
+            const form = document.getElementById('activePlanForm');
+            form.elements.enabled.value = enabled ? '1' : '0';
+            const data = new FormData(form); data.append('action', 'save_energy_preferences');
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+                if (res.status === 'success') location.reload(); else alert(res.message || 'Could not update maintenance source.');
+            });
+        }
+
+        function applyPlanRegime(mode) {
+            const adjustments = { 'Fat Loss': -2000, Maintenance: 0, 'Lean Gain': 1000, 'High Gain': 2500, 'Dirty Bulk': 4500 };
+            document.getElementById('goalModeSelect').value = mode;
+            if (mode === 'Custom') { recalcPlanMacros(); return; }
+            document.getElementById('planGoalAdjustment').value = adjustments[mode];
+            setDefaultMacroProfile(mode);
+        }
+        function setDefaultMacroProfile(mode = 'Custom') {
+            const target = <?= (int)round($activePlan['maintenance']) ?> + (parseFloat(document.getElementById('planGoalAdjustment').value) || 0);
+            const proteinKj = <?= $lbm_kg * 2.20462 * 16.736 ?>;
+            const remaining = Math.max(0, target - proteinKj);
+            document.getElementById('pRatio').value = Math.round(proteinKj / target * 100);
+            const fatShare = mode === 'Dirty Bulk' ? 0.5 : (mode === 'High Gain' ? 0.4 : 1 / 3);
+            document.getElementById('fRatio').value = Math.round((remaining * fatShare) / target * 100);
+            document.getElementById('cRatio').value = 100 - parseInt(document.getElementById('pRatio').value) - parseInt(document.getElementById('fRatio').value);
+            recalcPlanMacros();
+        }
+        function balancePlanSliders(active) {
+            const p = document.getElementById('pRatio'), f = document.getElementById('fRatio'), c = document.getElementById('cRatio');
+            let total = +p.value + +f.value + +c.value;
+            while (total !== 100) { const target = active === 'p' ? c : (active === 'f' ? c : f); target.value = +target.value + (total < 100 ? 1 : -1); total = +p.value + +f.value + +c.value; }
+            document.getElementById('goalModeSelect').value = 'Custom'; recalcPlanMacros();
+        }
+        function recalcPlanMacros() {
+            const target = <?= (int)round($activePlan['maintenance']) ?> + (parseFloat(document.getElementById('planGoalAdjustment').value) || 0);
+            const p = +document.getElementById('pRatio').value / 100, f = +document.getElementById('fRatio').value / 100, c = +document.getElementById('cRatio').value / 100;
+            const pg = target * p / KJ_PROT, fg = target * f / KJ_FAT, cg = target * c / KJ_CARB;
+            document.getElementById('pGram').textContent = Math.round(pg) + 'g'; document.getElementById('fGram').textContent = Math.round(fg) + 'g'; document.getElementById('cGram').textContent = Math.round(cg) + 'g';
+            document.getElementById('planTargetKj').value = Math.round(target); document.getElementById('finalP').value = pg; document.getElementById('finalF').value = fg; document.getElementById('finalC').value = cg;
+        }
+        function initialisePlanControls() {
+            const target = <?= (int)round($activePlan['target_kj']) ?>;
+            const proteinShare = <?= (float)$activePlan['protein'] ?> * KJ_PROT / target;
+            const fatShare = <?= (float)$activePlan['fat'] ?> * KJ_FAT / target;
+            document.getElementById('pRatio').value = Math.round(proteinShare * 100);
+            document.getElementById('fRatio').value = Math.round(fatShare * 100);
+            document.getElementById('cRatio').value = 100 - parseInt(document.getElementById('pRatio').value) - parseInt(document.getElementById('fRatio').value);
+            recalcPlanMacros();
+        }
+        document.addEventListener('DOMContentLoaded', initialisePlanControls);
 
         function submitInit(e) {
             e.preventDefault();

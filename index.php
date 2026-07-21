@@ -107,6 +107,14 @@ $stmt = $db->query("
     LIMIT 1");
 $fav_meal = $stmt->fetch(PDO::FETCH_ASSOC);
 
+// ── Short-life inventory approaching expiry ─────────────────────────────────
+$stmt = $db->query("SELECT p.name, i.expiry_date, i.expiry_source,
+    CAST(julianday(i.expiry_date) - julianday('now', 'localtime') AS INTEGER) AS days_remaining
+    FROM inventory i JOIN products p ON p.id = i.product_id
+    WHERE i.current_qty > 0 AND i.expiry_date IS NOT NULL AND i.expiry_date <= date('now', '+3 days')
+    ORDER BY i.expiry_date ASC, p.name ASC LIMIT 4");
+$expiring_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // ── Page setup ────────────────────────────────────────────────────────────────
 $page_title = 'Dashboard';
 $page_context = 'home';
@@ -309,15 +317,26 @@ include 'core/page_head.php';
             </div>
         </div>
 
-        <!-- Card 8: Favourite Meal (30d) -->
-        <!-- TODO: Replace with Expiring Soon once expiry tracking is implemented -->
-        <!-- <div class="col-6 col-lg-3">
-            <div class="dash-card" style="border-style:dashed; border-color:#1e1e1e;">
+        <div class="col-6 col-lg-3">
+            <div class="dash-card" style="<?= $expiring_items ? 'border-color:#6b4a1d;' : '' ?>">
                 <div class="dash-label">Expiring Soon</div>
-                <div class="dash-placeholder">—</div>
-                <div class="dash-sub" style="color:#444;">Expiry tracking not yet implemented</div>
+                <?php if ($expiring_items): ?>
+                    <?php foreach ($expiring_items as $item): ?>
+                        <?php $expired = (int)$item['days_remaining'] < 0; ?>
+                        <div class="top-row">
+                            <span class="top-name text-truncate"><?= htmlspecialchars($item['name']) ?></span>
+                            <span class="top-val" style="color:<?= $expired ? '#f44336' : '#ff9800' ?>; font-size:0.7rem;"><?= $expired ? 'expired' : ($item['days_remaining'] === 0 ? 'today' : $item['days_remaining'] . 'd') ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                    <div class="dash-sub"><?= count($expiring_items) ?> item<?= count($expiring_items) === 1 ? '' : 's' ?> need attention</div>
+                <?php else: ?>
+                    <div class="dash-placeholder">—</div>
+                    <div class="dash-sub">No short-life items due soon</div>
+                <?php endif; ?>
             </div>
-        </div> -->
+        </div>
+
+        <!-- Favourite Meal (30d) -->
         <div class="col-6 col-lg-3">
             <div class="dash-card">
                 <div class="dash-label">Favourite Meal <span style="color:#444;">(30d)</span></div>

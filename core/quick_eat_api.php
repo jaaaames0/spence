@@ -9,7 +9,7 @@ require_once __DIR__ . '/db_helper.php';
 ob_clean();
 header('Content-Type: application/json');
 
-$_key_file = __DIR__ . '/openrouter.env';
+$_key_file = '/srv/secrets/openrouter.env';
 $api_key = file_exists($_key_file)
     ? trim(file_get_contents($_key_file))
     : (getenv('OPENROUTER_API_KEY') ?: '');

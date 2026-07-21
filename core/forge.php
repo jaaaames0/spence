@@ -20,18 +20,30 @@ function getForgeDbConnection(): ?PDO {
     }
 }
 
-/** Return FORGE bodyweight and caliper body-fat readings in SPENCE's display timezone. */
+/** Return FORGE readings. Forge stores its SQLite timestamps as Australia/Sydney local wall time. */
 function getForgeVitalsHistory(): array {
     $forge = getForgeDbConnection();
     if (!$forge) return [];
 
     try {
-        $offset = SPENCE_TIMEZONE_OFFSET;
-        $weightStmt = $forge->query("SELECT DATETIME(started_at, '{$offset}') AS local_recorded_at, bodyweight_kg AS weight_kg, NULL AS body_fat_pct, 'Forge' AS source FROM workouts WHERE bodyweight_kg IS NOT NULL");
-        $bodyFatStmt = $forge->query("SELECT DATETIME(measured_at, '{$offset}') AS local_recorded_at, NULL AS weight_kg, caliper_bf_pct AS body_fat_pct, 'Forge' AS source FROM body_measurements WHERE caliper_bf_pct IS NOT NULL");
+        $weightStmt = $forge->query("SELECT started_at AS local_recorded_at, bodyweight_kg AS weight_kg, NULL AS body_fat_pct, 'Forge' AS source FROM workouts WHERE bodyweight_kg IS NOT NULL");
+        $bodyFatStmt = $forge->query("SELECT measured_at AS local_recorded_at, NULL AS weight_kg, caliper_bf_pct AS body_fat_pct, 'Forge' AS source FROM body_measurements WHERE caliper_bf_pct IS NOT NULL");
         $history = array_merge($weightStmt->fetchAll(PDO::FETCH_ASSOC), $bodyFatStmt->fetchAll(PDO::FETCH_ASSOC));
         usort($history, fn($a, $b) => strcmp($a['local_recorded_at'], $b['local_recorded_at']));
         return $history;
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+/** Return dated Forge workouts for energy-calibration context, never calorie estimates. */
+function getForgeWorkoutHistory(): array {
+    $forge = getForgeDbConnection();
+    if (!$forge) return [];
+    try {
+        return $forge->query("SELECT DATE(started_at) AS day, type,
+            ROUND((julianday(finished_at) - julianday(started_at)) * 1440) AS duration_minutes
+            FROM workouts WHERE started_at IS NOT NULL ORDER BY started_at ASC")->fetchAll(PDO::FETCH_ASSOC);
     } catch (Exception $e) {
         return [];
     }

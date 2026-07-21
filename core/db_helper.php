@@ -7,33 +7,61 @@
 date_default_timezone_set('Australia/Sydney');
 define('SPENCE_TIMEZONE_OFFSET', sprintf('%+d hours', (int)(date('Z') / 3600))); // Derived from system tz, handles AEDT/AEST DST
 
-function get_db_connection() {
-    $dbPath = __DIR__ . '/../database/spence.db';
+function applyDatabaseMigration(PDO $db, string $version, callable $migration): void {
+    $stmt = $db->prepare('SELECT 1 FROM schema_migrations WHERE version = ?');
+    $stmt->execute([$version]);
+    if ($stmt->fetchColumn()) return;
+
+    $db->beginTransaction();
+    try {
+        $migration($db);
+        $db->prepare('INSERT INTO schema_migrations (version) VALUES (?)')->execute([$version]);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+}
+
+function get_db_connection(?string $dbPath = null): PDO {
+    $dbPath ??= __DIR__ . '/../database/spence.db';
     $db = new PDO('sqlite:' . $dbPath);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->exec('PRAGMA busy_timeout = 5000;');
     $db->exec('PRAGMA journal_mode=WAL;');
     $db->exec('PRAGMA foreign_keys = ON;');
-    // Auto-migrations for consumption_log
-    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN source TEXT DEFAULT 'inventory'"); } catch (Exception $e) {}
-    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN name TEXT"); } catch (Exception $e) {}
-    // Nutrition snapshots make Quick Eat entries editable without adding one-off foods to the product master.
-    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_kj_per_100 REAL"); } catch (Exception $e) {}
-    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_protein_per_100 REAL"); } catch (Exception $e) {}
-    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_fat_per_100 REAL"); } catch (Exception $e) {}
-    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_carb_per_100 REAL"); } catch (Exception $e) {}
-    try { $db->exec("ALTER TABLE consumption_log ADD COLUMN quick_eat_weight_per_ea REAL"); } catch (Exception $e) {}
-    // Decimal deductions can leave an effectively-zero floating-point residue. It is not stock.
-    $db->exec("UPDATE inventory SET current_qty = 0, price_paid = 0 WHERE ABS(current_qty) < 0.0001");
-    $db->exec('CREATE TABLE IF NOT EXISTS dedupe_dismissed (
+    $db->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
+        version TEXT PRIMARY KEY,
+        applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )');
+
+    applyDatabaseMigration($db, '001_consumption_log_extensions', function (PDO $db): void {
+        $columns = $db->query('PRAGMA table_info(consumption_log)')->fetchAll(PDO::FETCH_COLUMN, 1);
+        $requiredColumns = [
+            'source' => "TEXT DEFAULT 'inventory'",
+            'name' => 'TEXT',
+            'quick_eat_kj_per_100' => 'REAL',
+            'quick_eat_protein_per_100' => 'REAL',
+            'quick_eat_fat_per_100' => 'REAL',
+            'quick_eat_carb_per_100' => 'REAL',
+            'quick_eat_weight_per_ea' => 'REAL',
+        ];
+        foreach ($requiredColumns as $name => $definition) {
+            if (!in_array($name, $columns, true)) {
+                $db->exec("ALTER TABLE consumption_log ADD COLUMN {$name} {$definition}");
+            }
+        }
+    });
+
+    applyDatabaseMigration($db, '002_supporting_tables', function (PDO $db): void {
+        $db->exec('CREATE TABLE IF NOT EXISTS dedupe_dismissed (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id_a INTEGER NOT NULL,
         product_id_b INTEGER NOT NULL,
         dismissed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(product_id_a, product_id_b)
-    )');
-    // Spice Rack tables
-    $db->exec('CREATE TABLE IF NOT EXISTS spice_rack (
+        )');
+        $db->exec('CREATE TABLE IF NOT EXISTS spice_rack (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE COLLATE NOCASE,
         is_stocked INTEGER NOT NULL DEFAULT 1,
@@ -41,23 +69,71 @@ function get_db_connection() {
         restock_flagged INTEGER NOT NULL DEFAULT 0,
         last_restocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )');
-    $db->exec('CREATE TABLE IF NOT EXISTS recipe_spices (
+        )');
+        $db->exec('CREATE TABLE IF NOT EXISTS recipe_spices (
         recipe_id INTEGER NOT NULL,
         spice_id INTEGER NOT NULL,
         PRIMARY KEY (recipe_id, spice_id),
         FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
         FOREIGN KEY (spice_id) REFERENCES spice_rack(id) ON DELETE CASCADE
-    )');
-    // Seed canonical spice list (INSERT OR IGNORE — safe to run every boot)
-    $canonical_spices = [
+        )');
+        $canonicalSpices = [
         'Salt', 'Black Pepper', 'Garlic Powder', 'Onion Powder', 'Paprika',
         'Smoked Paprika', 'Cumin', 'Coriander', 'Turmeric', 'Chili Flakes',
         'Cayenne Pepper', 'Oregano', 'Thyme', 'Rosemary', 'Basil',
         'Cinnamon', 'Ginger', 'Bay Leaves',
-    ];
-    $ins = $db->prepare("INSERT OR IGNORE INTO spice_rack (name) VALUES (?)");
-    foreach ($canonical_spices as $spice) { $ins->execute([$spice]); }
+        ];
+        $insert = $db->prepare('INSERT OR IGNORE INTO spice_rack (name) VALUES (?)');
+        foreach ($canonicalSpices as $spice) $insert->execute([$spice]);
+    });
+
+    applyDatabaseMigration($db, '003_inventory_residue_cleanup', function (PDO $db): void {
+        // Decimal deductions can leave an effectively-zero floating-point residue. It is not stock.
+        $db->exec('UPDATE inventory SET current_qty = 0, price_paid = 0 WHERE ABS(current_qty) < 0.0001');
+    });
+
+    applyDatabaseMigration($db, '004_query_indexes', function (PDO $db): void {
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_consumption_log_consumed_at ON consumption_log(consumed_at)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_consumption_log_product_id ON consumption_log(product_id)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_inventory_product_location ON inventory(product_id, location)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_inventory_product_quantity ON inventory(product_id, current_qty)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe_id ON recipe_ingredients(recipe_id)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_product_id ON recipe_ingredients(product_id)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_user_vitals_recorded_at ON user_vitals_history(recorded_at)');
+    });
+
+    applyDatabaseMigration($db, '005_inventory_expiry_source', function (PDO $db): void {
+        $columns = $db->query('PRAGMA table_info(inventory)')->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('expiry_date', $columns, true)) {
+            $db->exec('ALTER TABLE inventory ADD COLUMN expiry_date DATE');
+        }
+        if (!in_array('expiry_source', $columns, true)) {
+            $db->exec('ALTER TABLE inventory ADD COLUMN expiry_source TEXT');
+        }
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_inventory_expiry_date ON inventory(expiry_date) WHERE expiry_date IS NOT NULL');
+    });
+
+    applyDatabaseMigration($db, '006_energy_calibration', function (PDO $db): void {
+        $db->exec('CREATE TABLE IF NOT EXISTS energy_day_exclusions (
+            day DATE PRIMARY KEY,
+            excluded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )');
+        $db->exec('CREATE TABLE IF NOT EXISTS energy_preferences (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            use_calibrated_targets INTEGER NOT NULL DEFAULT 0,
+            goal_adjustment_kj REAL NOT NULL DEFAULT 0,
+            training_adjustment_kj REAL NOT NULL DEFAULT 0,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_energy_day_exclusions_day ON energy_day_exclusions(day)');
+    });
+
+    applyDatabaseMigration($db, '007_activity_rate_override', function (PDO $db): void {
+        if (!$db->query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_profiles'")->fetchColumn()) return;
+        $columns = $db->query('PRAGMA table_info(user_profiles)')->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('activity_rate_override', $columns, true)) $db->exec('ALTER TABLE user_profiles ADD COLUMN activity_rate_override INTEGER NOT NULL DEFAULT 0');
+    });
+
     return $db;
 }
 
@@ -65,6 +141,46 @@ function get_db_connection() {
 function normalizeInventoryBalance(PDO $db, int $inventoryId): void {
     $stmt = $db->prepare("UPDATE inventory SET current_qty = 0, price_paid = 0 WHERE id = ? AND ABS(current_qty) < 0.0001");
     $stmt->execute([$inventoryId]);
+}
+
+/**
+ * Deduct a product across inventory lots while preserving each lot's own cost basis.
+ * Returns the actual quantity and cost deducted; a small shortfall is tolerated for cook rounding.
+ */
+function deductInventoryLots(PDO $db, int $productId, float $requiredQty, float $tolerance = 0.01): array {
+    $stmt = $db->prepare("SELECT id, current_qty, price_paid FROM inventory WHERE product_id = ? AND current_qty > 0 ORDER BY current_qty DESC, id ASC");
+    $stmt->execute([$productId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $remaining = $requiredQty;
+    $deductedQty = 0.0;
+    $deductedCost = 0.0;
+    $update = $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+
+    foreach ($rows as $row) {
+        if ($remaining <= 0) break;
+        $availableQty = (float)$row['current_qty'];
+        $availableCost = (float)$row['price_paid'];
+        $deduct = min($availableQty, $remaining);
+        $rowUnitCost = $availableQty > 0 ? $availableCost / $availableQty : 0.0;
+        $isDepleted = $deduct >= ($availableQty - 0.0001);
+        $costReduction = $isDepleted ? $availableCost : $rowUnitCost * $deduct;
+
+        $update->execute([
+            $isDepleted ? 0 : $availableQty - $deduct,
+            $isDepleted ? 0 : max(0, $availableCost - $costReduction),
+            $row['id'],
+        ]);
+        normalizeInventoryBalance($db, (int)$row['id']);
+
+        $remaining -= $deduct;
+        $deductedQty += $deduct;
+        $deductedCost += $costReduction;
+    }
+
+    if ($remaining > $tolerance) throw new Exception("Insufficient stock for ingredient.");
+
+    return ['quantity' => $deductedQty, 'cost' => $deductedCost];
 }
 
 /**

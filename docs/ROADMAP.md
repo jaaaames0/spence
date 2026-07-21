@@ -59,19 +59,25 @@
 ## 🚀 PHASE 4: v2.0 — Predictive Intelligence
 *Focus: Proactive agency and metabolic insights.*
 
-- [ ] **Expiry Tracking:** Wire up `inventory.expiry_date` column (already in schema). Expiring Soon card on dashboard goes live. Stock page expiry column and sort. Alert badge when items are within 3 days.
-- [ ] **Adaptive Daily Targets:** "Training Day" vs "Rest Day" macro toggle.
-- [ ] **Adaptive Signal Ingest:** Scan nutritional labels directly (Photo → Genesis Product) without a receipt.
-- [ ] **Shopping List Predictor:** Auto-generated list from rolling consumption averages vs current stock.
-- [ ] **AI Chef:** Dynamic meal recommendations using "Ingredients on Hand" vs "Macro Targets for Today".
-- [ ] **Recipe Discovery:** Import recipes from external sources. Auto-create products for missing ingredients. Spice requirements auto-populated from ingredient list.
+- [x] **Expiry Tracking:** Short-life items can carry label-derived or AI-estimated expiry dates; stock and dashboard surface items due within three days.
+- [x] **Adaptive Daily Targets:** A calibrated maintenance estimate, plan mode, daily energy change, and training-day addition now produce one active daily plan.
+- [x] **Adaptive Signal Ingest:** Existing receipt scanning and Quick Eat handle nutrition-label images without requiring a traditional receipt.
+- [x] **Export Engine:** JSON backup and CSV exports are available from Settings.
+- [ ] **Recipe Intelligence:** One combined discovery, planning, and import feature.
+  - Discover candidates through licensed APIs and compliant source imports.
+  - Support manual URL import through standard Schema.org `Recipe` JSON-LD where source terms allow it.
+  - Match imported ingredients to Product Master and inventory; show exact matches, substitutes, missing items, and uncertainty for review.
+  - Rank candidates by kitchen coverage, permitted missing ingredients, expiring-stock usage, active-plan fit, and estimated cost.
+  - Recalculate authoritative SPENCE macros and lot-based cost after user approval; retain source nutrition as reference only.
+  - Import the approved recipe into RecipeDB and send confirmed missing ingredients to the sibling Ingredients shopping-list app through a defined authenticated contract.
+- [~] **Shopping List Predictor:** Not planned as a standalone feature. Shopping-list output belongs to Recipe Intelligence's confirmed missing-ingredient flow.
+- [~] **AI Chef:** Not planned as a standalone generative feature. Its role is recipe ranking, ingredient normalisation, substitution explanation, and import review within Recipe Intelligence.
 
 ---
 
 ## 🌐 PHASE 5: v2.1 — Distribution
-*Focus: Make SPENCE deployable by others.*
+*Deferred: SPENCE remains a single-user, same-server application for the current scope.*
 
-- [ ] **SPENCE Installer:** One-shot `setup.sh` to configure Nginx, SQLite, and permissions.
-- [ ] **Configuration Wizard:** Web-based setup for API keys and user goal initialisation.
-- [ ] **The "Wipe" Protocol:** Purge personal data while preserving canonical product master for sharing.
-- [ ] **Export Engine:** One-click CSV/JSON export for external analysis.
+- [~] **SPENCE Installer:** Deferred unless SPENCE is prepared for distribution.
+- [~] **Configuration Wizard:** Deferred unless multi-install deployment is required.
+- [~] **The "Wipe" Protocol:** Deferred unless canonical-data sharing becomes a goal.

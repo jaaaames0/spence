@@ -98,27 +98,29 @@ include '../core/page_head.php';
 ?>
     <div class="container-fluid px-4 pb-5">
         <div class="section-header row mb-4 align-items-center">
-            <div class="col-6 col-md-4"><h2 class="fw-black uppercase mb-0" style="font-size:clamp(1.2rem,4vw,2rem);">Analysis</h2></div>
-            <div class="col-6 col-md-4 text-end">
+            <div class="col-6 col-md-6"><h2 class="fw-black uppercase mb-0" style="font-size:clamp(1.2rem,4vw,2rem);">Analysis</h2></div>
+            <div class="col-6 col-md-6 text-end">
                 <div class="date-control">
                     <a href="?view=<?= $view_type ?>&date=<?= $prev_week_date ?>" class="text-muted"><i class="bi bi-chevron-left"></i></a>
                     <input type="date" class="datepicker-input" value="<?= $current_date ?>" onchange="location.href='?view=<?= $view_type ?>&date=' + this.value">
                     <a href="?view=<?= $view_type ?>&date=<?= $next_week_date ?>" class="text-muted <?= $current_date >= $today_str ? 'opacity-25' : '' ?>"><i class="bi bi-chevron-right"></i></a>
                 </div>
             </div>
-            <div class="col-12 col-md-4 d-flex justify-content-end mt-2 mt-md-0">
+        </div>
+
+        <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-4 border-bottom border-secondary">
+            <ul class="nav nav-tabs mb-0" style="border-bottom:0;">
+                <li class="nav-item"><a class="nav-link" href="index.php?date=<?= $current_date ?>">DAILY VIEW</a></li>
+                <li class="nav-item"><a class="nav-link active" href="weekly.php?date=<?= $current_date ?>">WEEKLY TRENDS</a></li>
+                <li class="nav-item"><a class="nav-link" href="progress.php?date=<?= $current_date ?>">PROGRESS</a></li>
+            </ul>
+            <div class="pb-2">
                 <div class="btn-group">
                     <a href="?view=rolling&date=<?= $current_date ?>" class="btn btn-sm <?= $view_type === 'rolling' ? 'btn-secondary' : 'btn-outline-secondary' ?> fw-bold">7D ROLLING</a>
                     <a href="?view=fixed&date=<?= $current_date ?>" class="btn btn-sm <?= $view_type === 'fixed' ? 'btn-secondary' : 'btn-outline-secondary' ?> fw-bold">MON-SUN</a>
                 </div>
             </div>
         </div>
-
-        <ul class="nav nav-tabs mb-4">
-            <li class="nav-item"><a class="nav-link" href="index.php?date=<?= $current_date ?>">DAILY VIEW</a></li>
-            <li class="nav-item"><a class="nav-link active" href="weekly.php?date=<?= $current_date ?>">WEEKLY TRENDS</a></li>
-            <li class="nav-item"><a class="nav-link" href="progress.php?date=<?= $current_date ?>">PROGRESS</a></li>
-        </ul>
 
         <div class="chart-container mb-4">
             <div class="d-flex justify-content-between align-items-center mb-4">

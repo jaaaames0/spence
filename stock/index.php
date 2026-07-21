@@ -8,7 +8,7 @@ $db = get_db_connection();
 
 $sort = $_GET['sort'] ?? 'name';
 $order = $_GET['order'] ?? 'ASC';
-$allowedSorts = ['name', 'current_qty', 'price_paid', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carb_per_100', 'location', 'category', 'kj_per_dollar', 'protein_per_dollar', 'price_per_unit'];
+$allowedSorts = ['name', 'current_qty', 'price_paid', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carb_per_100', 'location', 'expiry_date', 'category', 'kj_per_dollar', 'protein_per_dollar', 'price_per_unit'];
 if (!in_array($sort, $allowedSorts)) $sort = 'name';
 $order = ($order === 'ASC') ? 'ASC' : 'DESC';
 
@@ -96,6 +96,7 @@ include '../core/page_head.php';
                     <th class="col-fat d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('fat_per_100', $sort, $order) ?>" class="<?= $sort==='fat_per_100'?'text-accent fw-black':'text-white' ?>">F/100g <?= $sort==='fat_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="col-carbs d-none d-md-table-cell text-center" style="width: 80px;"><a href="<?= sortUrl('carb_per_100', $sort, $order) ?>" class="<?= $sort==='carb_per_100'?'text-accent fw-black':'text-white' ?>">C/100g <?= $sort==='carb_per_100'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="col-location d-none d-md-table-cell" style="width: 120px;"><a href="<?= sortUrl('location', $sort, $order) ?>" class="<?= $sort==='location'?'text-accent fw-black':'text-white' ?>">LOCATION <?= $sort==='location'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
+                    <th class="col-expiry d-none d-md-table-cell" style="width: 115px;"><a href="<?= sortUrl('expiry_date', $sort, $order) ?>" class="<?= $sort==='expiry_date'?'text-accent fw-black':'text-white' ?>">EXPIRY <?= $sort==='expiry_date'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="col-category d-none d-md-table-cell" style="width: 120px;"><a href="<?= sortUrl('category', $sort, $order) ?>" class="<?= $sort==='category'?'text-accent fw-black':'text-white' ?>">CATEGORY <?= $sort==='category'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="text-end text-muted" style="width: 100px;">ACTIONS</th>
                 </tr></thead>
@@ -134,6 +135,17 @@ include '../core/page_head.php';
                                 <option value="Freezer" <?= $item['location'] == 'Freezer' ? 'selected' : '' ?>>Freezer</option>
                             </select></div>
                         </td>
+                        <td class="col-expiry d-none d-md-table-cell small">
+                            <div class="view-mode">
+                                <?php if ($item['expiry_date']):
+                                    $daysToExpiry = (int)((strtotime($item['expiry_date']) - strtotime('today')) / 86400);
+                                    $expiryColor = $daysToExpiry < 0 ? '#f44336' : ($daysToExpiry <= 3 ? '#ff9800' : '#999');
+                                ?>
+                                    <span style="color:<?= $expiryColor ?>;"><?= $item['expiry_source'] === 'estimated' ? '≈ ' : '' ?><?= date('j M', strtotime($item['expiry_date'])) ?></span>
+                                <?php else: ?><span class="text-muted">—</span><?php endif; ?>
+                            </div>
+                            <div class="edit-mode"><input type="date" class="edit-input edit-expiry" value="<?= htmlspecialchars($item['expiry_date'] ?? '') ?>" onkeydown="handleKey(event, <?= $item['id'] ?>)"></div>
+                        </td>
                         <td class="col-category d-none d-md-table-cell small uppercase text-muted"><?= htmlspecialchars($item['category']) ?></td>
                         <td class="text-end">
                             <div class="view-mode">
@@ -154,6 +166,7 @@ include '../core/page_head.php';
                                 <span class="badge badge-fat"><?= number_format($item['fat_per_100'], 1) ?>g F/100g</span>
                                 <span class="badge badge-carb"><?= number_format($item['carb_per_100'], 1) ?>g C/100g</span>
                                 <span class="text-muted uppercase" style="font-size:0.65rem;"><?= htmlspecialchars($item['category']) ?></span>
+                                <?php if ($item['expiry_date']): ?><span style="color:<?= $expiryColor ?>;"><?= $item['expiry_source'] === 'estimated' ? '≈ ' : '' ?>Expires <?= date('j M', strtotime($item['expiry_date'])) ?></span><?php endif; ?>
                             </div>
                         </td>
                     </tr>
@@ -186,6 +199,7 @@ include '../core/page_head.php';
                         <div class="form-check"><input class="form-check-input col-toggle" type="checkbox" value="col-fat" id="chk-fat" checked><label class="form-check-label small uppercase" for="chk-fat">Fat / 100g</label></div>
                         <div class="form-check"><input class="form-check-input col-toggle" type="checkbox" value="col-carbs" id="chk-carbs" checked><label class="form-check-label small uppercase" for="chk-carbs">Carbs / 100g</label></div>
                         <div class="form-check border-top border-secondary pt-2 mt-1"><input class="form-check-input col-toggle" type="checkbox" value="col-location" id="chk-location" checked><label class="form-check-label small uppercase" for="chk-location">Location</label></div>
+                        <div class="form-check"><input class="form-check-input col-toggle" type="checkbox" value="col-expiry" id="chk-expiry" checked><label class="form-check-label small uppercase" for="chk-expiry">Expiry</label></div>
                         <div class="form-check"><input class="form-check-input col-toggle" type="checkbox" value="col-category" id="chk-category" checked><label class="form-check-label small uppercase" for="chk-category">Category</label></div>
                     </div>
                 </div>
@@ -230,6 +244,7 @@ include '../core/page_head.php';
                                 <option value="Freezer">Freezer</option>
                             </select>
                         </div>
+                        <div class="mb-3"><label class="form-label small fw-bold text-muted uppercase">Expiry Date <span class="fw-normal" style="text-transform:none;">(optional)</span></label><input type="date" name="expiry_date" class="form-control"></div>
                     </div>
                     <div class="modal-footer border-0">
                         <button type="submit" class="btn btn-secondary w-100 fw-bold">ADD TO WAREHOUSE</button>
@@ -476,6 +491,7 @@ include '../core/page_head.php';
             data.append('qty', row.querySelector('.edit-qty').value);
             data.append('price', row.querySelector('.edit-price').value);
             data.append('location', row.querySelector('.edit-location').value);
+            data.append('expiry_date', row.querySelector('.edit-expiry').value);
             fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status==='success') location.reload(); });
         }
         function deleteRow(id) { fetch('../core/api.php', { method: 'POST', body: new URLSearchParams({action: 'delete', id: id}) }).then(r => r.json()).then(res => { if(res.status==='success') document.getElementById('row-'+id).remove(); }); }

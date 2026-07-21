@@ -1,9 +1,19 @@
 # SPENCE | Changelog
 
 ### Unreleased (2026-07-20) - "Quick Eat & Forge Foundations"
+- **Energy Calibration:** Added a historical intake/weight-trend TDEE estimator with coverage and confidence gates. The estimator identifies a confirmed cut → transition → bulk change and calibrates the active phase separately. Settings can opt into calibrated rest/training-day energy targets; Progress shows the read-only calibration summary. Daily Log dates can be excluded when food logging was incomplete.
+- **Unified Active Nutrition Plan:** Settings now presents one plan model: maintenance estimate + daily energy change + optional training-day addition = daily targets. Plan modes are Fat Loss, Maintenance, Lean Gain, High Gain, Dirty Bulk, and Custom. Protein defaults to 1g/lb LBM; High Gain and Dirty Bulk progressively favour fat in the remaining macro energy. Forge activity over the latest 28 days recommends the formula fallback activity rate without overwriting manual choices.
+- **Forge Local Dates:** Forge timestamps are now treated as their stored Australia/Sydney local time, keeping workout-day targets and progress readings on the correct calendar date.
+- **Data Export:** Settings now offers a complete JSON backup plus CSV exports for inventory, consumption, recipes, and vitals.
+- **Expiry Tracking:** Short-life inventory can carry an editable expiry date, source-marked as label-derived or estimated. Receipt vision is constrained to estimate only appropriate perishables, while pantry-stable goods remain untracked. Stock sorting and the dashboard now surface items due within three days.
+- **Recipe Cost Accuracy:** Cooking now deducts from each inventory lot using its own remaining cost basis, so mixed-price stock produces correct cooked-meal and consumption costs.
+- **Receipt Ingest Consolidation:** Live receipt scans and the legacy job bridge now share one transactional ingest service. Item-level failures are retained in the job result instead of being silently discarded.
+- **Database Foundation:** Connection-time schema changes are now versioned migrations rather than repeated exception-driven `ALTER TABLE` calls. Added indexes for consumption history, inventory lookups, recipe ingredients, and vitals, plus a lightweight database regression test (`php tests/test_db_helper.php`).
 - **Quick Eat Corrections:** Photo and existing-product Quick Eat entries now preserve an immutable nutrition snapshot. New Quick Eat entries can be corrected from the daily log without affecting inventory or requiring a Product Master record.
 - **Quick Eat Costing:** Vision analysis now estimates an editable total AUD cost per photo item; existing products use their recorded unit cost. Historical cost is included in daily, weekly, and monthly spend reporting.
 - **Quick Eat Confirmation:** Existing-product Quick Eat now shows the same successful consumption confirmation and macro summary as the photo flow.
+- **Consumption Preview Reset:** Clearing or closing the Eat modal now clears its macro preview, preventing stale values from a previous item being shown.
+- **Weekly Navigation:** Weekly Trends now shares the Daily Log tab-bar layout, with its date selector and period controls grouped at the right.
 - **Inventory Residue Cleanup:** Tiny floating-point quantities left by consumption or recipe deduction are clamped to zero with their residual cost, preventing effectively-empty items from remaining in stock.
 - **Input Quality of Life:** Enter confirms non-form consumption and correction inputs. Search clear controls appear inside populated search fields across the main app surfaces.
 - **FORGE Progress Read:** Progress charts and history now combine local SPENCE vitals with read-only FORGE workout bodyweights and caliper body-fat readings. `FORGE_DB_PATH` supports non-standard Forge database locations.

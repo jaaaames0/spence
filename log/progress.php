@@ -5,7 +5,9 @@
 require_once '../core/auth.php';
 require_once '../core/db_helper.php';
 require_once '../core/forge.php';
+require_once '../core/energy_calibration.php';
 $db = get_db_connection();
+$energyCalibration = getEnergyCalibration($db);
 
 // --- Time-Travel Logic (for tab consistency) ---
 $today_str = date('Y-m-d');
@@ -58,7 +60,7 @@ include '../core/page_head.php';
         </div>
 
         <div class="row g-4">
-            <div class="col-md-6">
+            <div class="col-md-8 mx-auto">
                 <div class="chart-container">
                     <h6 class="stat-label uppercase mb-3">Vitals History</h6>
                     <div class="table-responsive">
@@ -72,9 +74,9 @@ include '../core/page_head.php';
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach (array_reverse($vitals_history) as $v): ?>
-                                <tr>
-                                    <td><?= date('j M Y, H:i', strtotime($v['local_recorded_at'])) ?></td>
+                                <?php foreach (array_reverse($vitals_history) as $index => $v): ?>
+                                <tr class="vitals-row <?= $index >= 15 ? 'd-none' : '' ?>">
+                                    <td><?= date('j M Y', strtotime($v['local_recorded_at'])) ?></td>
                                     <td class="fw-bold"><?= $v['weight_kg'] !== null ? number_format($v['weight_kg'], 1) : '—' ?></td>
                                     <td class="text-accent"><?= $v['body_fat_pct'] !== null ? number_format($v['body_fat_pct'], 1) . '%' : '—' ?></td>
                                     <td><span class="badge <?= $v['source'] === 'Forge' ? 'bg-danger' : 'bg-secondary' ?>"><?= htmlspecialchars($v['source']) ?></span></td>
@@ -83,6 +85,7 @@ include '../core/page_head.php';
                             </tbody>
                         </table>
                     </div>
+                    <?php if (count($vitals_history) > 15): ?><button id="loadMoreVitals" class="btn btn-sm btn-outline-secondary w-100" onclick="loadMoreVitals()">LOAD MORE</button><?php endif; ?>
                 </div>
             </div>
         </div>
@@ -117,16 +120,16 @@ include '../core/page_head.php';
     </div>
 
     <script>
-    const labels = <?= json_encode(array_map(function($v) { return date('j M', strtotime($v['local_recorded_at'])); }, $vitals_history)) ?>;
-    const weightData = <?= json_encode(array_column($vitals_history, 'weight_kg')) ?>;
-    const bfData = <?= json_encode(array_column($vitals_history, 'body_fat_pct')) ?>;
+    const weightData = <?= json_encode(array_values(array_filter(array_map(fn($v) => $v['weight_kg'] !== null ? ['x' => strtotime($v['local_recorded_at']) * 1000, 'y' => (float)$v['weight_kg']] : null, $vitals_history)))) ?>;
+    const bfData = <?= json_encode(array_values(array_filter(array_map(fn($v) => $v['body_fat_pct'] !== null ? ['x' => strtotime($v['local_recorded_at']) * 1000, 'y' => (float)$v['body_fat_pct']] : null, $vitals_history)))) ?>;
+    const allDates = [...weightData, ...bfData].map(point => point.x);
+    const xMin = allDates.length ? Math.min(...allDates) : undefined;
+    const xMax = allDates.length ? Math.max(...allDates) : undefined;
 
     const ctx = document.getElementById('progressChart').getContext('2d');
     new Chart(ctx, {
         type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
+        data: { datasets: [
                 {
                     label: 'Weight (kg)',
                     data: weightData,
@@ -173,18 +176,28 @@ include '../core/page_head.php';
                     title: { display: true, text: 'BODY FAT (%)', color: '#f44336', font: { weight: '900' } }
                 },
                 x: {
+                    type: 'linear',
+                    min: xMin,
+                    max: xMax,
                     grid: { display: false },
-                    ticks: { color: '#888' }
+                    ticks: { color: '#888', callback: value => new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) }
                 }
             },
             plugins: {
                 legend: {
                     display: true,
                     labels: { color: '#e0e0e0', font: { weight: 'bold' } }
-                }
+                },
+                tooltip: { callbacks: { title: items => items.length ? new Date(items[0].parsed.x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '' } }
             }
         }
     });
+
+    function loadMoreVitals() {
+        const hidden = [...document.querySelectorAll('.vitals-row.d-none')];
+        hidden.slice(0, 15).forEach(row => row.classList.remove('d-none'));
+        if (!document.querySelector('.vitals-row.d-none')) document.getElementById('loadMoreVitals').remove();
+    }
 
     function submitWeighIn(e) {
         e.preventDefault();

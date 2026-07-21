@@ -16,6 +16,7 @@ try {
         $qty = (float)($_POST['qty'] ?? 0);
         $price = (float)($_POST['price'] ?? 0);
         $location = $_POST['location'] ?? 'Pantry';
+        $expiryDate = trim($_POST['expiry_date'] ?? '') ?: null;
 
         // Fetch current values to check for qty-only changes
         $stmt = $db->prepare("SELECT current_qty, price_paid FROM inventory WHERE id = ?");
@@ -29,8 +30,8 @@ try {
             $price = $unit_cost * $qty;
         }
 
-        $stmt = $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, location = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-        $stmt->execute([$qty, $price, $location, $id]);
+        $stmt = $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, location = ?, expiry_date = ?, expiry_source = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+        $stmt->execute([$qty, $price, $location, $expiryDate, $expiryDate ? 'manual' : null, $id]);
         echo json_encode(['status' => 'success']);
 
     } elseif ($action === 'delete') {
@@ -65,14 +66,15 @@ try {
         $qty = (float)$_POST['qty'];
         $price = (float)$_POST['price'];
         $location = $_POST['location'] ?? 'Pantry';
+        $expiryDate = trim($_POST['expiry_date'] ?? '') ?: null;
 
         // Fetch the product's base unit for record keeping in the inventory table (optional but safe)
         $stmt = $db->prepare("SELECT base_unit FROM products WHERE id = ?");
         $stmt->execute([$product_id]);
         $base_unit = $stmt->fetchColumn() ?: 'ea';
 
-        $stmt = $db->prepare("INSERT INTO inventory (product_id, current_qty, price_paid, unit, location) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$product_id, $qty, $price, $base_unit, $location]);
+        $stmt = $db->prepare("INSERT INTO inventory (product_id, current_qty, price_paid, unit, location, expiry_date, expiry_source) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$product_id, $qty, $price, $base_unit, $location, $expiryDate, $expiryDate ? 'manual' : null]);
         echo json_encode(['status' => 'success']);
 
     } elseif ($action === 'check_job') {

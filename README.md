@@ -119,16 +119,13 @@ Potential duplicates against your existing product master are flagged for review
 
 ---
 
-## Planned Features (v2.0+)
+## Roadmap
 
-- [ ] **Expiry Tracking** — Wire up `inventory.expiry_date`; expiring soon card on dashboard; alert badge within 3 days
-- [ ] **Adaptive Daily Targets** — Training Day vs Rest Day macro toggle
-- [ ] **Label Scan** — Photo → Genesis Product without a receipt
-- [ ] **Shopping List Predictor** — Auto-generated from rolling consumption vs current stock
-- [ ] **AI Chef** — Dynamic meal recommendations from ingredients on hand vs today's macro targets
-- [ ] **Recipe Discovery** — Import recipes from external sources; auto-create missing products
-- [ ] **SPENCE Installer** — One-shot `setup.sh` for Nginx, SQLite, and permissions
-- [ ] **Export Engine** — One-click CSV/JSON export for external analysis
+Completed: expiry tracking, adaptive/calibrated daily targets, label-aware Quick Eat and receipt scans, and JSON/CSV data export.
+
+Next: **Recipe Intelligence** — discover recipes from licensed and compliant sources, match them against inventory and expiring stock, assess fit against the active nutrition plan, review substitutions and missing ingredients, then import approved recipes into RecipeDB. Confirmed missing ingredients will be sent to the sibling Ingredients shopping-list app.
+
+Shopping prediction and AI assistance are part of this one workflow rather than standalone features. Distribution tooling (installer, configuration wizard, and data-wipe protocol) is deferred while SPENCE remains a single-user application.
 
 ---
 

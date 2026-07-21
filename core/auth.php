@@ -9,7 +9,7 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 
 // Load key from gitignored credentials file, fallback to env var
-$_creds_file = __DIR__ . '/credentials.env';
+$_creds_file = '/srv/secrets/spence_credentials.env';
 $ACCESS_KEY  = file_exists($_creds_file)
     ? trim(file_get_contents($_creds_file))
     : (getenv('SPENCE_ACCESS_KEY') ?: '');

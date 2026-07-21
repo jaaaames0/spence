@@ -4,6 +4,7 @@
  */
 require_once '../core/auth.php';
 require_once '../core/db_helper.php';
+require_once '../core/energy_calibration.php';
 $db = get_db_connection();
 
 // --- Time-Travel ---
@@ -44,6 +45,11 @@ $averages = $stmt->fetch(PDO::FETCH_ASSOC);
 // 4. Goal Fetching
 $goals = getUserGoals($db);
 $goal_kj = $goals['kj']; $goal_p = $goals['p']; $goal_f = $goals['f']; $goal_c = $goals['c']; $goal_cost = $goals['cost'];
+$activePlan = getActiveEnergyPlan($db, $current_date);
+$goal_kj = $activePlan['target_kj']; $goal_p = $activePlan['protein']; $goal_f = $activePlan['fat']; $goal_c = $activePlan['carb'];
+$stmt = $db->prepare('SELECT 1 FROM energy_day_exclusions WHERE day = ?');
+$stmt->execute([$current_date]);
+$dayExcluded = (bool)$stmt->fetchColumn();
 
 function getAlertClass($current, $goal) {
     if (!$goal || $goal == 0) return 'd-none';
@@ -136,14 +142,20 @@ include '../core/page_head.php';
             </div>
         </div>
 
-        <ul class="nav nav-tabs mb-4">
-            <li class="nav-item"><a class="nav-link active" href="index.php?date=<?= $current_date ?>">DAILY VIEW</a></li>
-            <li class="nav-item"><a class="nav-link" href="weekly.php?date=<?= $current_date ?>">WEEKLY TRENDS</a></li>
-            <li class="nav-item"><a class="nav-link" href="progress.php?date=<?= $current_date ?>">PROGRESS</a></li>
-        </ul>
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4 border-bottom border-secondary">
+            <ul class="nav nav-tabs mb-0" style="border-bottom:0;">
+                <li class="nav-item"><a class="nav-link active" href="index.php?date=<?= $current_date ?>">DAILY VIEW</a></li>
+                <li class="nav-item"><a class="nav-link" href="weekly.php?date=<?= $current_date ?>">WEEKLY TRENDS</a></li>
+                <li class="nav-item"><a class="nav-link" href="progress.php?date=<?= $current_date ?>">PROGRESS</a></li>
+            </ul>
+            <label class="d-flex align-items-center gap-2 text-muted small" style="font-size:0.72rem; cursor:pointer;">
+                <input class="form-check-input m-0" type="checkbox" id="excludeEnergyDay" <?= $dayExcluded ? 'checked' : '' ?> onchange="setEnergyDayExclusion(this.checked)">
+                Exclude from calibration
+            </label>
+        </div>
 
         <div class="row g-2 mb-4">
-            <div class="col-6 col-md-2"><div class="stat-card"><div class="stat-label uppercase">Energy <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_kj'], $goal_kj) ?>"></i></div><div class="stat-value color-kj" style="font-size: 1.8rem;"><?= number_format($daily['total_kj'] ?: 0) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-sub color-kj opacity-50">/ <?= number_format($goal_kj) ?> kJ</div></div></div>
+            <div class="col-6 col-md-2"><div class="stat-card"><div class="stat-label uppercase">Energy <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_kj'], $goal_kj) ?>"></i></div><div class="stat-value color-kj" style="font-size: 1.8rem;"><?= number_format($daily['total_kj'] ?: 0) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-sub color-kj opacity-50">/ <?= number_format($goal_kj) ?> kJ<?= $activePlan['training'] ? ' · training' : '' ?></div></div></div>
             <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Prot <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_p'], $goal_p) ?>"></i></div><div class="stat-value color-p" style="font-size: 1.5rem;"><?= number_format($daily['total_p'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
             <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Fat <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_f'], $goal_f) ?>"></i></div><div class="stat-value color-f" style="font-size: 1.5rem;"><?= number_format($daily['total_f'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
             <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Carb <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_c'], $goal_c) ?>"></i></div><div class="stat-value color-c" style="font-size: 1.5rem;"><?= number_format($daily['total_c'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
@@ -283,6 +295,15 @@ include '../core/page_head.php';
         data.append('action', 'delete_log');
         data.append('id', id);
         fetch('../core/raid_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if (res.status === 'success') location.reload(); else alert(res.message); });
+    }
+    function setEnergyDayExclusion(excluded) {
+        const data = new FormData();
+        data.append('action', 'set_energy_day_exclusion');
+        data.append('day', <?= json_encode($current_date) ?>);
+        data.append('excluded', excluded ? '1' : '0');
+        fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            if (res.status === 'success') location.reload(); else alert(res.message || 'Could not update calibration exclusion.');
+        });
     }
 
     let quickEatEditId = null;
