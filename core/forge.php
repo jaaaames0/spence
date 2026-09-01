@@ -48,3 +48,44 @@ function getForgeWorkoutHistory(): array {
         return [];
     }
 }
+
+/** Return Forge's current reviewed cycle as an optional energy-regime hint. */
+function getForgeActiveEnergyRegime(): ?array {
+    $forge = getForgeDbConnection();
+    if (!$forge) return null;
+    try {
+        $cycle = $forge->query("SELECT c.cycle_type, c.starts_at, c.ends_at, c.source, c.confidence
+            FROM training_cycles c
+            JOIN training_eras e ON e.id = c.era_id
+            WHERE e.is_active = 1
+            ORDER BY c.starts_at DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if (!$cycle || !in_array($cycle['cycle_type'], ['cut', 'bulk'], true)) return null;
+        return [
+            'label' => $cycle['cycle_type'],
+            'active_start' => substr($cycle['starts_at'], 0, 10),
+            'active_end' => substr($cycle['ends_at'], 0, 10),
+            'source' => $cycle['source'],
+            'confidence' => $cycle['confidence'] === null ? null : (float)$cycle['confidence'],
+        ];
+    } catch (Exception $e) {
+        // Older or unavailable Forge databases must not disable SPENCE calibration.
+        return null;
+    }
+}
+
+/** Resolve the saved Forge cut/bulk cycle containing a local calendar day. */
+function getForgeEnergyRegimeForDay(string $day): ?string {
+    $forge = getForgeDbConnection();
+    if (!$forge) return null;
+    try {
+        $stmt = $forge->prepare("SELECT cycle_type FROM training_cycles
+            WHERE DATE(starts_at) <= ? AND DATE(ends_at) >= ?
+              AND cycle_type IN ('cut', 'bulk')
+            ORDER BY starts_at DESC LIMIT 1");
+        $stmt->execute([$day, $day]);
+        $label = $stmt->fetchColumn();
+        return $label === false ? null : (string)$label;
+    } catch (Exception $e) {
+        return null;
+    }
+}

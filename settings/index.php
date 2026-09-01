@@ -24,17 +24,9 @@ if ($has_profile) {
     $stmt->execute([$user['id']]);
     $vitals = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $stmt = $db->prepare("SELECT weight_kg, body_fat_pct, DATETIME(recorded_at, '" . SPENCE_TIMEZONE_OFFSET . "') AS local_recorded_at, 'Spence' AS source FROM user_vitals_history WHERE user_id = ?");
-    $stmt->execute([$user['id']]);
-    $combinedVitals = array_merge($stmt->fetchAll(PDO::FETCH_ASSOC), getForgeVitalsHistory());
-    usort($combinedVitals, fn($a, $b) => strcmp($a['local_recorded_at'], $b['local_recorded_at']));
-    $latestWeight = $latestBodyFat = null;
-    foreach (array_reverse($combinedVitals) as $reading) {
-        if ($latestWeight === null && $reading['weight_kg'] !== null) $latestWeight = (float)$reading['weight_kg'];
-        if ($latestBodyFat === null && $reading['body_fat_pct'] !== null) $latestBodyFat = (float)$reading['body_fat_pct'];
-    }
-    $vitals['weight_kg'] = $latestWeight ?? $vitals['weight_kg'];
-    $vitals['body_fat_pct'] = $latestBodyFat ?? $vitals['body_fat_pct'];
+    $latestVitals = getLatestCombinedVitals($db, (int)$user['id']);
+    $vitals['weight_kg'] = $latestVitals['weight_kg'] ?? $vitals['weight_kg'];
+    $vitals['body_fat_pct'] = $latestVitals['body_fat_pct'] ?? $vitals['body_fat_pct'];
 
     $stmt = $db->prepare("SELECT * FROM user_goals_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
     $stmt->execute([$user['id']]);
@@ -117,7 +109,7 @@ include '../core/page_head.php';
                             <div class="col-6">
                                 <div class="stat-label uppercase">Maintenance</div>
                                 <div class="stat-value color-kj"><?= number_format($activePlan['maintenance']) ?><span class="fs-6 ms-1 text-muted">kJ</span></div>
-                                <div class="small text-muted"><?= $activePlan['calibrated'] ? 'calibrated' : 'formula fallback' ?></div>
+                                <div class="small text-muted"><?= $activePlan['maintenance_source'] === 'current_observed' ? 'current observed' : ($activePlan['maintenance_source'] === 'prior_observed' ? 'last stable observed' : 'formula fallback') ?></div>
                             </div>
                             <div class="col-12 mt-3 pt-2 border-top border-secondary">
                                 <div class="stat-label uppercase">Activity Rate</div>
@@ -134,7 +126,7 @@ include '../core/page_head.php';
                         </div>
                         <div class="mt-4 pt-3 border-top border-secondary">
                             <div class="d-flex justify-content-between align-items-start gap-2 mb-2"><div><div class="stat-label uppercase">Energy Calibration</div><div class="small text-muted">Historical intake and weight trend.</div></div><span class="badge <?= $energyCalibration['confidence'] === 'high' ? 'bg-success' : ($energyCalibration['confidence'] === 'medium' ? 'bg-warning text-dark' : 'bg-secondary') ?> text-uppercase"><?= htmlspecialchars($energyCalibration['confidence']) ?></span></div>
-                            <?php if ($energyCalibration['tdee'] !== null): ?><div class="small mb-2"><strong class="color-kj"><?= number_format($energyCalibration['tdee']) ?> kJ</strong> observed maintenance · <?= round($energyCalibration['coverage'] * 100) ?>% coverage · <?= htmlspecialchars($energyCalibration['regime']['label']) ?> phase<?= $energyCalibration['regime']['active_start'] ? ' since ' . date('j M', strtotime($energyCalibration['regime']['active_start'])) : '' ?></div><?php else: ?><div class="small text-muted mb-2">Needs more matched weight and intake history.</div><?php endif; ?>
+                            <?php if ($energyCalibration['tdee'] !== null): ?><div class="small mb-2"><strong class="color-kj"><?= number_format($energyCalibration['tdee']) ?> kJ</strong> current observed maintenance · <?= round($energyCalibration['coverage'] * 100) ?>% coverage · <?= htmlspecialchars($energyCalibration['regime']['label']) ?> since <?= date('j M', strtotime($energyCalibration['regime']['active_start'])) ?><?= $energyCalibration['confidence'] === 'medium' && $energyCalibration['lastStableTdee'] !== null ? '<br><span class="text-muted">Targets retain the last stable ' . number_format($energyCalibration['lastStableTdee']) . ' kJ estimate until high confidence.</span>' : '' ?></div><?php elseif ($energyCalibration['lastStableTdee'] !== null): ?><div class="small mb-2"><strong class="color-kj"><?= number_format($energyCalibration['lastStableTdee']) ?> kJ</strong> last stable observed maintenance<?= $energyCalibration['lastStableRegime'] ? ' · ' . htmlspecialchars($energyCalibration['lastStableRegime']['label']) . ' phase' : '' ?><br><span class="text-muted"><?= ucfirst(htmlspecialchars($energyCalibration['regime']['label'])) ?> since <?= date('j M', strtotime($energyCalibration['regime']['active_start'])) ?><?= !empty($energyCalibration['regime']['transition_end']) ? ' · transition excluded through ' . date('j M', strtotime($energyCalibration['regime']['transition_end'])) : '' ?><?= $energyCalibration['regime']['calibration_start'] ? ' · calibration rebuilding from ' . date('j M', strtotime($energyCalibration['regime']['calibration_start'])) : '' ?>.</span></div><?php elseif ($energyCalibration['regime']['label'] === 'transition'): ?><div class="small text-muted mb-2">Possible phase change since <?= date('j M', strtotime($energyCalibration['regime']['active_start'])) ?>. Calibrated maintenance is paused while the trend is confirmed.</div><?php else: ?><div class="small text-muted mb-2">Rebuilding from the <?= htmlspecialchars($energyCalibration['regime']['label']) ?> phase<?= $energyCalibration['regime']['active_start'] ? ' since ' . date('j M', strtotime($energyCalibration['regime']['active_start'])) : '' ?>; needs more matched weight and intake history.</div><?php endif; ?>
                             <label class="form-check-label small"><input class="form-check-input me-2" type="checkbox" <?= $energyPrefs['use_calibrated_targets'] ? 'checked' : '' ?> <?= $energyCalibration['confidence'] !== 'high' ? 'disabled' : '' ?> onchange="toggleCalibratedMaintenance(this.checked)">Use high-confidence calibrated maintenance</label>
                         </div>
                     </div>
@@ -265,7 +257,7 @@ include '../core/page_head.php';
                 <form id="overrideForm" onsubmit="submitEnergyPlan(event)">
                     <div class="modal-header border-secondary"><h5 class="modal-title fw-black uppercase">Plan Adjustments</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
                     <div class="modal-body">
-                        <div class="small text-muted mb-3">Maintenance is <?= number_format($activePlan['maintenance']) ?> kJ/day from the <?= $activePlan['calibrated'] ? 'calibrated' : 'formula fallback' ?> model. These adjustments define the single active plan used across SPENCE.</div>
+                        <div class="small text-muted mb-3">Maintenance is <?= number_format($activePlan['maintenance']) ?> kJ/day from the <?= $activePlan['maintenance_source'] === 'current_observed' ? 'current observed' : ($activePlan['maintenance_source'] === 'prior_observed' ? 'last stable observed' : 'formula fallback') ?> model. These adjustments define the single active plan used across SPENCE.</div>
                         <div class="row g-3">
                             <div class="col-md-6"><label class="stat-label uppercase">Regime</label><select class="form-select form-select-lg" name="goal_type" id="goalModeSelect" onchange="applyPlanRegime(this.value)"><option value="Maintenance">Maintenance</option><option value="Weight Loss">Cut</option><option value="Lean Gain">Lean Gain</option><option value="Dirty Bulk">Dirty Bulk</option><option value="Custom">Custom</option></select></div>
                             <div class="col-md-6"><label class="stat-label uppercase">Goal adjustment (kJ/day)</label><input class="form-control form-control-lg" id="planGoalAdjustment" name="goal_adjustment_kj" type="number" value="<?= htmlspecialchars($energyPrefs['goal_adjustment_kj']) ?>" oninput="recalcPlanMacros()"><div class="small text-muted mt-1">Negative for loss, positive for gain.</div></div>
@@ -275,7 +267,7 @@ include '../core/page_head.php';
                                 <div class="mb-3"><div class="d-flex justify-content-between"><span class="small">Protein</span><strong id="pGram" class="color-p"></strong></div><input type="range" class="form-range" id="pRatio" min="10" max="60" oninput="balancePlanSliders('p')"></div>
                                 <div class="mb-3"><div class="d-flex justify-content-between"><span class="small">Fat</span><strong id="fGram" class="color-f"></strong></div><input type="range" class="form-range" id="fRatio" min="10" max="60" oninput="balancePlanSliders('f')"></div>
                                 <div class="mb-1"><div class="d-flex justify-content-between"><span class="small">Carbs</span><strong id="cGram" class="color-c"></strong></div><input type="range" class="form-range" id="cRatio" min="10" max="70" oninput="balancePlanSliders('c')"></div>
-                                <input type="hidden" name="target_kj" id="planTargetKj"><input type="hidden" name="p" id="finalP"><input type="hidden" name="f" id="finalF"><input type="hidden" name="c" id="finalC">
+                                <input type="hidden" name="target_kj" id="planTargetKj"><input type="hidden" name="p" id="finalP"><input type="hidden" name="f" id="finalF"><input type="hidden" name="c" id="finalC"><input type="hidden" name="maintenance_kj" value="<?= htmlspecialchars($activePlan['maintenance']) ?>"><input type="hidden" name="maintenance_source" value="<?= htmlspecialchars($activePlan['maintenance_source']) ?>">
                             </div>
                             <div class="col-12"><label class="form-check-label small"><input class="form-check-input me-2" type="checkbox" name="enabled" value="1" <?= $energyPrefs['use_calibrated_targets'] ? 'checked' : '' ?> <?= $energyCalibration['confidence'] !== 'high' ? 'disabled' : '' ?>>Use high-confidence calibrated maintenance</label></div>
                         </div>

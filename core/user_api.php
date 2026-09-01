@@ -56,8 +56,9 @@ try {
         $target_f = ($remaining_kj * $fat_share) / 37.656;
         $target_c = ($remaining_kj * (1 - $fat_share)) / 16.736;
 
-        $stmt = $db->prepare("INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$user_id, $goal_type, round($kj_goal), round($target_p), round($target_f), round($target_c), round($budget / 7, 2)]);
+        $regime = in_array($goal_type, ['Fat Loss', 'Weight Loss'], true) ? 'cut' : (in_array($goal_type, ['Lean Gain', 'High Gain', 'Dirty Bulk'], true) ? 'bulk' : 'maintenance');
+        $stmt = $db->prepare("INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily, regime, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$user_id, $goal_type, round($kj_goal), round($target_p), round($target_f), round($target_c), round($budget / 7, 2), $regime, date('Y-m-d')]);
 
         $db->commit();
         echo json_encode(['status' => 'success']);
@@ -80,8 +81,9 @@ try {
         $cost = (float)$_POST['cost'];
         $goal_type = $_POST['goal_type'] ?? 'Manual Override';
 
-        $stmt = $db->prepare("INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$user_id, $goal_type, $kj, $p, $f, $c, $cost]);
+        $regime = in_array($goal_type, ['Fat Loss', 'Weight Loss'], true) ? 'cut' : (in_array($goal_type, ['Lean Gain', 'High Gain', 'Dirty Bulk'], true) ? 'bulk' : null);
+        $stmt = $db->prepare("INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily, regime, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$user_id, $goal_type, $kj, $p, $f, $c, $cost, $regime, date('Y-m-d')]);
         echo json_encode(['status' => 'success']);
 
     } elseif ($action === 'update_activity') {
@@ -114,7 +116,13 @@ try {
         $userId = (int)$db->query('SELECT id FROM user_profiles LIMIT 1')->fetchColumn();
         $weeklyBudget = (float)($_POST['weekly_budget'] ?? 0);
         $db->prepare('UPDATE user_profiles SET weekly_budget = ? WHERE id = ?')->execute([$weeklyBudget, $userId]);
-        $db->prepare('INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily) VALUES (?, ?, ?, ?, ?, ?, ?)')->execute([$userId, $_POST['goal_type'] ?? 'Custom', (float)$_POST['target_kj'], (float)$_POST['p'], (float)$_POST['f'], (float)$_POST['c'], $weeklyBudget / 7]);
+        $targetKj = (float)$_POST['target_kj'];
+        $regime = $adjustment < 0 ? 'cut' : ($adjustment > 0 ? 'bulk' : 'maintenance');
+        $maintenanceKj = (float)($_POST['maintenance_kj'] ?? ($targetKj - $adjustment));
+        $maintenanceSource = $_POST['maintenance_source'] ?? 'plan_snapshot';
+        if (!in_array($maintenanceSource, ['current_observed', 'prior_observed', 'formula'], true)) $maintenanceSource = 'plan_snapshot';
+        $db->prepare('INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily, regime, maintenance_kj, goal_adjustment_kj, training_adjustment_kj, maintenance_source, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+           ->execute([$userId, $_POST['goal_type'] ?? 'Custom', $targetKj, (float)$_POST['p'], (float)$_POST['f'], (float)$_POST['c'], $weeklyBudget / 7, $regime, $maintenanceKj, $adjustment, $trainingAdjustment, $maintenanceSource, date('Y-m-d')]);
         $db->commit();
         echo json_encode(['status' => 'success']);
 

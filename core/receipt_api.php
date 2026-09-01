@@ -13,20 +13,20 @@ header('Content-Type: application/json');
 
 set_time_limit(120); // Vision calls can take up to 60s on a busy receipt
 
-$_key_file = '/srv/secrets/openrouter.env';
+$_key_file = '/srv/secrets/nanogpt.env';
 $api_key = file_exists($_key_file)
     ? trim(file_get_contents($_key_file))
-    : (getenv('OPENROUTER_API_KEY') ?: '');
+    : (getenv('NANOGPT_API_KEY') ?: '');
 
 try {
     if (($_POST['action'] ?? '') !== 'scan_receipt') {
         throw new Exception("Unknown action.");
     }
 
-    if (!$api_key) throw new Exception("OpenRouter API key not configured.");
+    if (!$api_key) throw new Exception("NanoGPT API key not configured.");
 
     if (!isset($_FILES['receipt']) || $_FILES['receipt']['error'] !== UPLOAD_ERR_OK) {
-        throw new Exception("No file received.");
+        throw new Exception(uploadErrorMessage($_FILES['receipt']['error'] ?? null));
     }
 
     $file    = $_FILES['receipt'];
@@ -76,7 +76,7 @@ try {
         . "Return ONLY a valid JSON array of objects.";
 
     $payload = json_encode([
-        'model'    => 'google/gemini-3-flash-preview',
+        'model'    => 'google/gemini-3.7-flash',
         'messages' => [[
             'role'    => 'user',
             'content' => [
@@ -117,7 +117,7 @@ try {
         ]
     ]);
 
-    $ch = curl_init('https://openrouter.ai/api/v1/chat/completions');
+    $ch = curl_init('https://nano-gpt.com/api/v1/chat/completions');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST           => true,
@@ -155,4 +155,22 @@ try {
 
 } catch (Exception $e) {
     echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+}
+
+/**
+ * Map PHP upload error codes to actionable messages.
+ * https://www.php.net/manual/en/features.file-upload.errors.php
+ */
+function uploadErrorMessage($code) {
+    switch ($code) {
+        case UPLOAD_ERR_OK:        return 'Upload succeeded.';
+        case UPLOAD_ERR_INI_SIZE:  return 'File too large (exceeds upload_max_filesize in php.ini).';
+        case UPLOAD_ERR_FORM_SIZE: return 'File too large (exceeds form MAX_FILE_SIZE).';
+        case UPLOAD_ERR_PARTIAL:   return 'Upload was interrupted before the file finished. Try again.';
+        case UPLOAD_ERR_NO_FILE:   return 'No file selected.';
+        case UPLOAD_ERR_NO_TMP_DIR:return 'Server misconfigured: no upload temp directory. Check upload_tmp_dir and AppArmor permissions on /tmp.';
+        case UPLOAD_ERR_CANT_WRITE:return 'Server could not write the uploaded file to disk. Check filesystem permissions and AppArmor.';
+        case UPLOAD_ERR_EXTENSION: return 'Upload blocked by a PHP extension.';
+        default:                   return 'No file received.';
+    }
 }

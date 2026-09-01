@@ -9,16 +9,18 @@ require_once __DIR__ . '/db_helper.php';
 ob_clean();
 header('Content-Type: application/json');
 
-$_key_file = '/srv/secrets/openrouter.env';
+set_time_limit(120);
+
+$_key_file = '/srv/secrets/nanogpt.env';
 $api_key = file_exists($_key_file)
     ? trim(file_get_contents($_key_file))
-    : (getenv('OPENROUTER_API_KEY') ?: '');
+    : (getenv('NANOGPT_API_KEY') ?: '');
 
 $action = $_POST['action'] ?? '';
 
 try {
     if ($action === 'scan') {
-        if (!$api_key) throw new Exception("OpenRouter API key not configured.");
+        if (!$api_key) throw new Exception("NanoGPT API key not configured.");
         if (!isset($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
             throw new Exception("No image received.");
         }
@@ -66,7 +68,7 @@ try {
         ];
 
         $payload = json_encode([
-            'model' => 'google/gemini-3-flash-preview',
+            'model' => 'google/gemini-3.7-flash',
             'messages' => [[
                 'role' => 'user',
                 'content' => [
@@ -87,12 +89,12 @@ try {
             ]
         ]);
 
-        $ch = curl_init('https://openrouter.ai/api/v1/chat/completions');
+        $ch = curl_init('https://nano-gpt.com/api/v1/chat/completions');
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $payload,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT        => 60,
             CURLOPT_HTTPHEADER     => [
                 'Content-Type: application/json',
                 'Authorization: Bearer ' . $api_key

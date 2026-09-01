@@ -68,22 +68,9 @@ $avgs = [
     'cost' => $totals['cost'] / $count
 ];
 
-// Smarter Goal Retrieval
-$goal_kj = 8700; $goal_p = 150; $goal_f = 70; $goal_c = 250; $goal_cost = 15.00;
-$stmt = $db->query("SELECT id FROM user_profiles LIMIT 1");
-$user_id = $stmt->fetchColumn();
-if ($user_id) {
-    $stmt = $db->prepare("SELECT * FROM user_goals_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
-    $stmt->execute([$user_id]);
-    $g = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($g) {
-        $goal_kj = $g['target_kj'];
-        $goal_p = $g['target_protein_g'];
-        $goal_f = $g['target_fat_g'];
-        $goal_c = $g['target_carb_g'];
-        $goal_cost = $g['cost_limit_daily'];
-    }
-}
+// Use the plan effective at the end of the viewed period, never today's plan for old weeks.
+$goals = getUserGoals($db, min($end_date, $today_str));
+$goal_kj = $goals['kj']; $goal_p = $goals['p']; $goal_f = $goals['f']; $goal_c = $goals['c']; $goal_cost = $goals['cost'];
 $page_title   = 'Weekly';
 $page_context = 'log';
 $extra_head   = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>';

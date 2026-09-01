@@ -134,6 +134,27 @@ function get_db_connection(?string $dbPath = null): PDO {
         if (!in_array('activity_rate_override', $columns, true)) $db->exec('ALTER TABLE user_profiles ADD COLUMN activity_rate_override INTEGER NOT NULL DEFAULT 0');
     });
 
+    applyDatabaseMigration($db, '008_historical_energy_plans', function (PDO $db): void {
+        if (!$db->query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_goals_history'")->fetchColumn()) return;
+        $columns = $db->query('PRAGMA table_info(user_goals_history)')->fetchAll(PDO::FETCH_COLUMN, 1);
+        $additions = [
+            'regime' => 'TEXT',
+            'maintenance_kj' => 'REAL',
+            'goal_adjustment_kj' => 'REAL',
+            'training_adjustment_kj' => 'REAL',
+            'maintenance_source' => 'TEXT',
+        ];
+        foreach ($additions as $name => $definition) {
+            if (!in_array($name, $columns, true)) $db->exec("ALTER TABLE user_goals_history ADD COLUMN {$name} {$definition}");
+        }
+        $db->exec("UPDATE user_goals_history SET regime = CASE
+            WHEN goal_type IN ('Fat Loss', 'Weight Loss') THEN 'cut'
+            WHEN goal_type IN ('Lean Gain', 'High Gain', 'Dirty Bulk') THEN 'bulk'
+            WHEN goal_type = 'Maintenance' THEN 'maintenance'
+            ELSE regime END WHERE regime IS NULL");
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_user_goals_effective_date ON user_goals_history(user_id, start_date, created_at)');
+    });
+
     return $db;
 }
 
@@ -288,17 +309,23 @@ function getCategoryOrderSQL(string $column = 'p.category'): string {
 }
 
 /**
- * Fetch current user goals with sensible defaults if no profile exists.
- * Returns: ['user_id', 'kj', 'p', 'f', 'c', 'cost']
+ * Fetch goals effective on a local calendar day, or the current goals when no day is supplied.
  */
-function getUserGoals(PDO $db): array {
-    $defaults = ['user_id' => null, 'kj' => 8700, 'p' => 150, 'f' => 70, 'c' => 250, 'cost' => 15.00];
+function getUserGoals(PDO $db, ?string $day = null): array {
+    $defaults = ['user_id' => null, 'kj' => 8700, 'p' => 150, 'f' => 70, 'c' => 250, 'cost' => 15.00,
+        'goal_type' => 'Maintenance', 'regime' => 'maintenance', 'history_id' => null, 'maintenance_kj' => null,
+        'goal_adjustment_kj' => null, 'training_adjustment_kj' => null, 'maintenance_source' => null];
 
     $user_id = $db->query("SELECT id FROM user_profiles LIMIT 1")->fetchColumn();
     if (!$user_id) return $defaults;
 
-    $stmt = $db->prepare("SELECT * FROM user_goals_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
-    $stmt->execute([$user_id]);
+    if ($day !== null) {
+        $stmt = $db->prepare('SELECT * FROM user_goals_history WHERE user_id = ? AND start_date <= ? ORDER BY start_date DESC, created_at DESC, id DESC LIMIT 1');
+        $stmt->execute([$user_id, $day]);
+    } else {
+        $stmt = $db->prepare('SELECT * FROM user_goals_history WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 1');
+        $stmt->execute([$user_id]);
+    }
     $g = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$g) return array_merge($defaults, ['user_id' => $user_id]);
 
@@ -309,6 +336,13 @@ function getUserGoals(PDO $db): array {
         'f'       => (float)$g['target_fat_g'],
         'c'       => (float)$g['target_carb_g'],
         'cost'    => (float)$g['cost_limit_daily'],
+        'goal_type' => $g['goal_type'] ?: 'Custom',
+        'regime' => $g['regime'] ?: null,
+        'history_id' => (int)$g['id'],
+        'maintenance_kj' => $g['maintenance_kj'] === null ? null : (float)$g['maintenance_kj'],
+        'goal_adjustment_kj' => $g['goal_adjustment_kj'] === null ? null : (float)$g['goal_adjustment_kj'],
+        'training_adjustment_kj' => $g['training_adjustment_kj'] === null ? null : (float)$g['training_adjustment_kj'],
+        'maintenance_source' => $g['maintenance_source'] ?: null,
     ];
 }
 

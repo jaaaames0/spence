@@ -43,7 +43,7 @@ $stmt->execute([$current_date, $current_date]);
 $averages = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // 4. Goal Fetching
-$goals = getUserGoals($db);
+$goals = getUserGoals($db, $current_date);
 $goal_kj = $goals['kj']; $goal_p = $goals['p']; $goal_f = $goals['f']; $goal_c = $goals['c']; $goal_cost = $goals['cost'];
 $activePlan = getActiveEnergyPlan($db, $current_date);
 $goal_kj = $activePlan['target_kj']; $goal_p = $activePlan['protein']; $goal_f = $activePlan['fat']; $goal_c = $activePlan['carb'];
@@ -51,12 +51,21 @@ $stmt = $db->prepare('SELECT 1 FROM energy_day_exclusions WHERE day = ?');
 $stmt->execute([$current_date]);
 $dayExcluded = (bool)$stmt->fetchColumn();
 
-function getAlertClass($current, $goal) {
+function getCostAlertClass($current, $goal) {
     if (!$goal || $goal == 0) return 'd-none';
     $pct = ($current / $goal) * 100;
     if ($pct >= 100) return 'text-danger';
     if ($pct >= 85) return 'text-warning';
     return 'd-none';
+}
+
+function nutritionTargetIndicator(string $metric, float $current, float $goal, string $regime): string {
+    $zone = getNutritionTargetZone($metric, $current, $goal, $regime);
+    if ($zone === 'neutral') return '';
+    $classes = ['red' => 'text-danger', 'orange' => 'text-warning', 'green' => 'text-success'];
+    $icons = ['red' => 'bi-exclamation-circle-fill', 'orange' => 'bi-exclamation-circle', 'green' => 'bi-check-circle-fill'];
+    $label = ucfirst($metric) . ' is in the ' . $zone . ' target zone for this ' . $regime . ' plan';
+    return '<i class="bi ' . $icons[$zone] . ' ' . $classes[$zone] . '" title="' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '"></i>';
 }
 
 // Detailed Log (Chronological Order + Local Time for Display)
@@ -155,12 +164,12 @@ include '../core/page_head.php';
         </div>
 
         <div class="row g-2 mb-4">
-            <div class="col-6 col-md-2"><div class="stat-card"><div class="stat-label uppercase">Energy <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_kj'], $goal_kj) ?>"></i></div><div class="stat-value color-kj" style="font-size: 1.8rem;"><?= number_format($daily['total_kj'] ?: 0) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-sub color-kj opacity-50">/ <?= number_format($goal_kj) ?> kJ<?= $activePlan['training'] ? ' · training' : '' ?></div></div></div>
-            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Prot <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_p'], $goal_p) ?>"></i></div><div class="stat-value color-p" style="font-size: 1.5rem;"><?= number_format($daily['total_p'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
-            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Fat <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_f'], $goal_f) ?>"></i></div><div class="stat-value color-f" style="font-size: 1.5rem;"><?= number_format($daily['total_f'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
-            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Carb <i class="bi bi-exclamation-circle <?= getAlertClass($daily['total_c'], $goal_c) ?>"></i></div><div class="stat-value color-c" style="font-size: 1.5rem;"><?= number_format($daily['total_c'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
+            <div class="col-6 col-md-2"><div class="stat-card"><div class="stat-label uppercase">Energy <?= nutritionTargetIndicator('energy', (float)($daily['total_kj'] ?: 0), (float)$goal_kj, $activePlan['regime']) ?></div><div class="stat-value color-kj" style="font-size: 1.8rem;"><?= number_format($daily['total_kj'] ?: 0) ?><span class="fs-6 ms-1 opacity-50">kJ</span></div><div class="stat-sub color-kj opacity-50">/ <?= number_format($goal_kj) ?> kJ · <?= htmlspecialchars($activePlan['regime']) ?><?= $activePlan['training'] ? ' · training' : '' ?></div></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Prot <?= nutritionTargetIndicator('protein', (float)($daily['total_p'] ?: 0), (float)$goal_p, $activePlan['regime']) ?></div><div class="stat-value color-p" style="font-size: 1.5rem;"><?= number_format($daily['total_p'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Fat <?= nutritionTargetIndicator('fat', (float)($daily['total_f'] ?: 0), (float)$goal_f, $activePlan['regime']) ?></div><div class="stat-value color-f" style="font-size: 1.5rem;"><?= number_format($daily['total_f'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Carb <?= nutritionTargetIndicator('carb', (float)($daily['total_c'] ?: 0), (float)$goal_c, $activePlan['regime']) ?></div><div class="stat-value color-c" style="font-size: 1.5rem;"><?= number_format($daily['total_c'] ?: 0, 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-sub color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
             <div class="col-6 col-md-2 text-center"><div class="stat-card d-flex flex-column align-items-center justify-content-center"><div class="stat-label uppercase mb-2">Split</div><canvas id="dailyPie" style="max-height: 60px;"></canvas></div></div>
-            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Cost <i class="bi bi-exclamation-circle <?= getAlertClass($daily_cost, $goal_cost) ?>"></i></div><div class="stat-value color-cost" style="font-size: 1.8rem;">$<?= number_format($daily_cost, 2) ?></div><div class="stat-sub color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div></div></div>
+            <div class="col-6 col-md"><div class="stat-card"><div class="stat-label uppercase">Cost <i class="bi bi-exclamation-circle <?= getCostAlertClass($daily_cost, $goal_cost) ?>"></i></div><div class="stat-value color-cost" style="font-size: 1.8rem;">$<?= number_format($daily_cost, 2) ?></div><div class="stat-sub color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div></div></div>
         </div>
 
         <div class="card bg-dark border-secondary overflow-hidden">

@@ -36,6 +36,11 @@ CREATE TABLE user_goals_history (
     target_fat_g REAL,
     target_carb_g REAL,
     cost_limit_daily REAL,
+    regime TEXT,
+    maintenance_kj REAL,
+    goal_adjustment_kj REAL,
+    training_adjustment_kj REAL,
+    maintenance_source TEXT,
     start_date DATE DEFAULT CURRENT_DATE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
