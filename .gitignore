@@ -30,3 +30,5 @@ core/*.base64
 .DS_Store
 .vscode/
 node_modules/
+.claude/
+/spence.db

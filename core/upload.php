@@ -5,7 +5,7 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
 
-$uploadDir = __DIR__ . '/../uploads/';
+$uploadDir = rtrim(getenv('SPENCE_UPLOAD_DIR') ?: __DIR__ . '/../uploads', '/') . '/';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['receipt'])) {
     $file = $_FILES['receipt'];

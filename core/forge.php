@@ -5,7 +5,9 @@
  */
 
 function getForgeDbConnection(): ?PDO {
-    $defaultPath = dirname(__DIR__, 2) . '/forge/database/forge.db';
+    $runtimePath = '/var/lib/forge/forge.db';
+    $siblingPath = dirname(__DIR__, 2) . '/forge/database/forge.db';
+    $defaultPath = is_readable($runtimePath) ? $runtimePath : $siblingPath;
     $dbPath = getenv('FORGE_DB_PATH') ?: $defaultPath;
     if (!is_readable($dbPath)) return null;
 

@@ -24,7 +24,7 @@ function applyDatabaseMigration(PDO $db, string $version, callable $migration): 
 }
 
 function get_db_connection(?string $dbPath = null): PDO {
-    $dbPath ??= __DIR__ . '/../database/spence.db';
+    $dbPath ??= getenv('SPENCE_DB_PATH') ?: __DIR__ . '/../database/spence.db';
     $db = new PDO('sqlite:' . $dbPath);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->exec('PRAGMA busy_timeout = 5000;');
