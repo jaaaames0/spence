@@ -19,6 +19,12 @@ The export is built in one SQLite read transaction, checked, synced, made
 read-only, and renamed over the prior export. An in-flight request can finish
 against the old inode; the next request opens the new immutable export.
 
+The publisher is a separate locked `forge-web` process with no network access.
+Its systemd sandbox makes the source database and WAL read-only, permits the
+SQLite shared-memory coordination file, and allows writes only within Forge's
+own state tree. The web-facing Spence identity receives read access to the
+published file, not permission to execute or control the publisher.
+
 Spence rejects an unsupported schema or an export older than five minutes and
 falls back to its existing local-data behaviour. Publication normally runs
 once per minute, so a newly started workout or saved body-composition reading
