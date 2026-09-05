@@ -2,9 +2,8 @@
 Description=Refresh the version 1 Forge-to-Spence data projection
 
 [Timer]
-OnBootSec=1min
-OnUnitActiveSec=1min
-AccuracySec=5s
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
 RandomizedDelaySec=5s
 Persistent=yes
 Unit=forge-spence-export-v1.service
