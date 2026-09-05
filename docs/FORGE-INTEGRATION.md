@@ -46,3 +46,7 @@ estimate workout energy—publish `spence-v2.db` alongside version 1:
 
 Parallel versions avoid a lock-step deployment and keep new Forge tables
 private unless a reviewed Spence workflow genuinely needs them.
+
+Run `php ops/validate-forge-export-v1.php` as an identity that can read both
+databases to compare row counts and deterministic hashes. It deliberately does
+not print body-composition values, workout details, or cycle dates.
