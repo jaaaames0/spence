@@ -1,23 +1,83 @@
 <?php
 /**
  * Read-only FORGE integration helpers.
- * Set FORGE_DB_PATH in the PHP-FPM environment to override the sibling-app default.
+ *
+ * Production consumes a versioned, atomically published projection rather than
+ * Forge's live WAL database. Set FORGE_DB_PATH to override the projection path.
  */
 
-function getForgeDbConnection(): ?PDO {
-    $runtimePath = '/var/lib/forge/forge.db';
+const FORGE_EXPORT_SCHEMA_VERSION = 1;
+const FORGE_EXPORT_MAX_AGE_SECONDS = 300;
+
+function reportForgeIntegrationFailure(string $reason): void {
+    static $reported = [];
+    if (isset($reported[$reason])) return;
+    $reported[$reason] = true;
+    error_log('Spence Forge integration unavailable: ' . $reason);
+}
+
+function getForgeExportPath(): array {
+    $runtimePath = '/var/lib/forge/exports/spence-v1.db';
     $siblingPath = dirname(__DIR__, 2) . '/forge/database/forge.db';
-    $defaultPath = is_readable($runtimePath) ? $runtimePath : $siblingPath;
-    $dbPath = getenv('FORGE_DB_PATH') ?: $defaultPath;
-    if (!is_readable($dbPath)) return null;
+    $configuredPath = getenv('FORGE_DB_PATH');
+
+    if ($configuredPath !== false && $configuredPath !== '') {
+        return ['path' => $configuredPath, 'requires_contract' => true];
+    }
+    if (is_readable($runtimePath)) {
+        return ['path' => $runtimePath, 'requires_contract' => true];
+    }
+
+    // The sibling database fallback is for a local development checkout only.
+    return ['path' => $siblingPath, 'requires_contract' => false];
+}
+
+function getForgeDbConnection(): ?PDO {
+    $resolved = getForgeExportPath();
+    $dbPath = $resolved['path'];
+    if (!is_string($dbPath) || $dbPath === '' || $dbPath[0] !== '/' || strpbrk($dbPath, "?#\0") !== false) {
+        reportForgeIntegrationFailure('invalid database path');
+        return null;
+    }
+    if (!is_file($dbPath) || !is_readable($dbPath)) {
+        reportForgeIntegrationFailure('database is not readable');
+        return null;
+    }
+
+    if ($resolved['requires_contract']) {
+        $maxAge = filter_var(getenv('FORGE_EXPORT_MAX_AGE_SECONDS') ?: FORGE_EXPORT_MAX_AGE_SECONDS, FILTER_VALIDATE_INT);
+        if ($maxAge === false || $maxAge < 60) $maxAge = FORGE_EXPORT_MAX_AGE_SECONDS;
+        $modifiedAt = filemtime($dbPath);
+        if ($modifiedAt === false || time() - $modifiedAt > $maxAge) {
+            reportForgeIntegrationFailure('export is stale');
+            return null;
+        }
+    }
 
     try {
-        $db = new PDO('sqlite:' . $dbPath);
+        $dsn = $resolved['requires_contract']
+            ? 'sqlite:file:' . $dbPath . '?mode=ro&immutable=1'
+            : 'sqlite:' . $dbPath;
+        $db = new PDO($dsn);
         $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $db->exec('PRAGMA query_only = ON;');
         $db->exec('PRAGMA busy_timeout = 5000;');
+
+        if ($resolved['requires_contract']) {
+            $metadata = $db->query('SELECT schema_version, exported_at_utc FROM forge_export_metadata LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+            if (!$metadata || (int)$metadata['schema_version'] !== FORGE_EXPORT_SCHEMA_VERSION) {
+                reportForgeIntegrationFailure('unsupported export schema');
+                return null;
+            }
+            $exportedAt = strtotime((string)$metadata['exported_at_utc']);
+            if ($exportedAt === false || time() - $exportedAt > $maxAge || $exportedAt > time() + 60) {
+                reportForgeIntegrationFailure('invalid or stale export timestamp');
+                return null;
+            }
+        }
         return $db;
     } catch (Exception $e) {
+        reportForgeIntegrationFailure('database open or contract validation failed');
         return null;
     }
 }

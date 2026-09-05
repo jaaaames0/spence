@@ -82,7 +82,7 @@ Open `core/auth.php` and change the `ACCESS_KEY` constant from the default befor
 
 ### Optional: connect FORGE
 
-SPENCE reads FORGE bodyweight and caliper body-fat data on the Progress page without writing to FORGE. In the standard sibling-app layout it automatically uses `../forge/database/forge.db`. To use another location, set `FORGE_DB_PATH` in the PHP-FPM environment to the absolute path of Forge's database.
+SPENCE reads selected FORGE workout, body-composition, and training-cycle data without writing to FORGE. Production consumes the versioned read-only projection described in `docs/FORGE-INTEGRATION.md`; a sibling source checkout remains available as a development fallback. To use a projected database at another location, set `FORGE_DB_PATH` to its absolute path.
 
 ### 6. Visit the app
 

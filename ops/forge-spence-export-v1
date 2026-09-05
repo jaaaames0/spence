@@ -1,0 +1,85 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+source_db=/var/lib/forge/forge.db
+export_dir=/var/lib/forge/exports
+target=$export_dir/spence-v1.db
+lock_file=$export_dir/.spence-v1.lock
+
+test "$#" -eq 0
+test -r "$source_db"
+test -d "$export_dir"
+
+exec 9>"$lock_file"
+/usr/bin/flock -n 9 || exit 0
+
+temporary=$(/usr/bin/mktemp --tmpdir="$export_dir" .spence-v1.XXXXXX.db)
+cleanup() {
+    /usr/bin/rm -f -- "$temporary" "$temporary-journal" "$temporary-wal" "$temporary-shm"
+}
+trap cleanup EXIT
+
+/usr/local/bin/sqlite3 "$temporary" <<'SQL'
+ATTACH DATABASE 'file:/var/lib/forge/forge.db?mode=ro' AS forge;
+PRAGMA main.journal_mode = DELETE;
+PRAGMA main.synchronous = FULL;
+PRAGMA main.user_version = 1;
+BEGIN;
+
+CREATE TABLE workouts (
+    started_at TEXT,
+    finished_at TEXT,
+    type TEXT,
+    bodyweight_kg REAL
+);
+INSERT INTO workouts (started_at, finished_at, type, bodyweight_kg)
+SELECT started_at, finished_at, type, bodyweight_kg FROM forge.workouts;
+
+CREATE TABLE body_measurements (
+    measured_at TEXT,
+    caliper_bf_pct REAL
+);
+INSERT INTO body_measurements (measured_at, caliper_bf_pct)
+SELECT measured_at, caliper_bf_pct FROM forge.body_measurements;
+
+CREATE TABLE training_eras (
+    id INTEGER PRIMARY KEY,
+    is_active INTEGER
+);
+INSERT INTO training_eras (id, is_active)
+SELECT id, is_active FROM forge.training_eras;
+
+CREATE TABLE training_cycles (
+    era_id INTEGER,
+    cycle_type TEXT,
+    starts_at TEXT,
+    ends_at TEXT,
+    source TEXT,
+    confidence REAL
+);
+INSERT INTO training_cycles (era_id, cycle_type, starts_at, ends_at, source, confidence)
+SELECT era_id, cycle_type, starts_at, ends_at, source, confidence
+FROM forge.training_cycles;
+
+CREATE TABLE forge_export_metadata (
+    schema_version INTEGER NOT NULL,
+    exported_at_utc TEXT NOT NULL
+);
+INSERT INTO forge_export_metadata (schema_version, exported_at_utc)
+VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+
+CREATE INDEX workouts_started_at_idx ON workouts(started_at);
+CREATE INDEX training_cycles_starts_at_idx ON training_cycles(starts_at);
+COMMIT;
+DETACH DATABASE forge;
+SQL
+
+test "$(/usr/local/bin/sqlite3 -readonly "$temporary" 'PRAGMA main.quick_check;')" = ok
+test "$(/usr/local/bin/sqlite3 -readonly "$temporary" 'PRAGMA main.user_version;')" = 1
+/usr/bin/chmod 0440 "$temporary"
+/usr/bin/sync -f "$temporary"
+/usr/bin/mv -fT -- "$temporary" "$target"
+/usr/bin/sync -f "$export_dir"
+trap - EXIT
+
+printf 'published Forge-to-Spence export schema=1\n'
