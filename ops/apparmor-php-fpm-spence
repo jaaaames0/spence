@@ -1,0 +1,41 @@
+# Dedicated Spence PHP-FPM hat, included from the php-fpm parent profile.
+profile spence {
+  include <abstractions/php-worker>
+  include <abstractions/nameservice>
+  include <abstractions/ssl_certs>
+
+  /srv/jaaaames.com/spence r,
+  /srv/jaaaames.com/spence/** r,
+  /usr/local/lib/spence/ r,
+  /usr/local/lib/spence/** r,
+
+  /etc/spence/access-key r,
+  /etc/spence/nanogpt-key r,
+
+  /run/php/php8.3-spence-fpm.sock rw,
+
+  /var/lib/spence/ r,
+  /var/lib/spence/spence.db rwk,
+  /var/lib/spence/spence.db-{journal,wal,shm} rwk,
+  /var/lib/spence/uploads/ rw,
+  /var/lib/spence/uploads/** rwk,
+  /var/lib/spence/tmp/ rw,
+  /var/lib/spence/tmp/** rwk,
+  /var/lib/spence/sessions/ rw,
+  /var/lib/spence/sessions/sess_* rwk,
+
+  /var/lib/forge/ r,
+  /var/lib/forge/exports/ r,
+  /var/lib/forge/exports/spence-v1.db r,
+
+  # Required for DNS and NanoGPT HTTPS. AppArmor cannot restrict a socket by
+  # DNS name; the host firewall and application URL remain the network bounds.
+  network inet dgram,
+  network inet6 dgram,
+  network inet stream,
+  network inet6 stream,
+
+  # Enable only after the operator confirms the Get Ingredients workflow.
+  # /srv/jaaaames.com/ingredients/ r,
+  # /srv/jaaaames.com/ingredients/shopping_list.json rwk,
+}

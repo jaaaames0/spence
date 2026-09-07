@@ -7,28 +7,40 @@
  */
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
+require_once __DIR__ . '/runtime_config.php';
 
-// Load key from gitignored credentials file, fallback to env var
-$_creds_file = '/srv/secrets/spence_credentials.env';
-$ACCESS_KEY  = file_exists($_creds_file)
-    ? trim(file_get_contents($_creds_file))
-    : (getenv('SPENCE_ACCESS_KEY') ?: '');
+// The pool supplies only a non-secret file path. The value never enters the
+// FPM master environment; the value fallback is retained for local development.
+$ACCESS_KEY = spenceReadCredential(
+    'SPENCE_CREDENTIAL_FILE',
+    '/srv/secrets/spence_credentials.env',
+    'SPENCE_ACCESS_KEY'
+);
+if ($ACCESS_KEY === '') {
+    http_response_code(503);
+    exit('Spence authentication is unavailable.');
+}
 
 $AUTH_TOKEN  = hash_hmac('sha256', 'spence_auth_v1', $ACCESS_KEY);
 $COOKIE_NAME = 'spence_auth';
 $COOKIE_TTL  = 365 * 24 * 3600; // 1 year
 
 if (isset($_GET['logout'])) {
-    setcookie($COOKIE_NAME, '', time() - 3600, '/', '', false, true);
+    setcookie($COOKIE_NAME, '', spenceAuthCookieOptions(time() - 3600));
+    // Remove the legacy site-wide cookie after the path-scoping migration.
+    setcookie($COOKIE_NAME, '', spenceAuthCookieOptions(time() - 3600, '/'));
     header("Location: /spence/");
     exit;
 }
 
-$authenticated = isset($_COOKIE[$COOKIE_NAME]) && hash_equals($AUTH_TOKEN, $_COOKIE[$COOKIE_NAME]);
+$authenticated = isset($_COOKIE[$COOKIE_NAME])
+    && is_string($_COOKIE[$COOKIE_NAME])
+    && hash_equals($AUTH_TOKEN, $_COOKIE[$COOKIE_NAME]);
 
 if (!$authenticated) {
-    if (isset($_POST['access_key']) && $_POST['access_key'] === $ACCESS_KEY) {
-        setcookie($COOKIE_NAME, $AUTH_TOKEN, time() + $COOKIE_TTL, '/', '', false, true);
+    if (isset($_POST['access_key']) && is_string($_POST['access_key']) && hash_equals($ACCESS_KEY, $_POST['access_key'])) {
+        setcookie($COOKIE_NAME, '', spenceAuthCookieOptions(time() - 3600, '/'));
+        setcookie($COOKIE_NAME, $AUTH_TOKEN, spenceAuthCookieOptions(time() + $COOKIE_TTL));
         header("Location: " . $_SERVER['PHP_SELF']);
         exit;
     }

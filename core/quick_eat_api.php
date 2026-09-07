@@ -11,10 +11,11 @@ header('Content-Type: application/json');
 
 set_time_limit(120);
 
-$_key_file = '/srv/secrets/nanogpt.env';
-$api_key = file_exists($_key_file)
-    ? trim(file_get_contents($_key_file))
-    : (getenv('NANOGPT_API_KEY') ?: '');
+$api_key = spenceReadCredential(
+    'NANOGPT_CREDENTIAL_FILE',
+    '/srv/secrets/nanogpt.env',
+    'NANOGPT_API_KEY'
+);
 
 $action = $_POST['action'] ?? '';
 
