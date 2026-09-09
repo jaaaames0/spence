@@ -23,15 +23,18 @@ try {
     $db->exec('PRAGMA busy_timeout=5000');
     $db->exec('BEGIN IMMEDIATE');
     $db->exec('UPDATE schema_migrations SET applied_at=applied_at WHERE rowid=(SELECT rowid FROM schema_migrations LIMIT 1)');
-    $db->rollBack();
+    $db->exec('ROLLBACK');
     $check('database_write_lock', true);
 } catch (Throwable $error) {
-    if (isset($db) && $db instanceof PDO && $db->inTransaction()) $db->rollBack();
-    $check('database_write_lock', false, get_class($error));
+    if (isset($db) && $db instanceof PDO) {
+        try { $db->exec('ROLLBACK'); } catch (Throwable $ignored) {}
+    }
+    $check('database_write_lock', false, get_class($error) . ': ' . $error->getMessage());
 }
 
 foreach (['upload' => '/var/lib/spence/uploads', 'temp' => '/var/lib/spence/tmp', 'session' => '/var/lib/spence/sessions'] as $name => $directory) {
-    $path = @tempnam($directory, '.isolation-probe-');
+    $prefix = $name === 'session' ? 'sess_' : '.isolation-probe-';
+    $path = @tempnam($directory, $prefix);
     $passed = is_string($path) && @file_put_contents($path, 'probe') === 5 && @unlink($path);
     $check($name . '_write', $passed);
     if (is_string($path) && file_exists($path)) @unlink($path);
@@ -44,7 +47,7 @@ try {
     $forge->query('SELECT COUNT(*) FROM workouts')->fetchColumn();
     $check('forge_projection_read', $schema === 1, 'schema=' . $schema);
 } catch (Throwable $error) {
-    $check('forge_projection_read', false, get_class($error));
+    $check('forge_projection_read', false, get_class($error) . ': ' . $error->getMessage());
 }
 
 $ingredientsHandle = @fopen('/srv/jaaaames.com/ingredients/shopping_list.json', 'r+');
@@ -74,7 +77,9 @@ foreach ([
     'ingredients_php_denied' => '/srv/jaaaames.com/ingredients/api.php',
     'openrouter_denied' => '/srv/secrets/openrouter.env',
 ] as $name => $path) {
-    $check($name, !is_readable($path));
+    $handle = @fopen($path, 'r');
+    $check($name, !is_resource($handle));
+    if (is_resource($handle)) fclose($handle);
 }
 
 $passed = !array_filter($results, fn(array $result): bool => !$result['pass']);
