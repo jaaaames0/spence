@@ -28,6 +28,12 @@ preparation release safe on the shared pool before cutover. The dedicated pool
 must set the `/etc/spence` paths explicitly. Credential values must not be put
 in FPM environment variables.
 
+The retained recipe **Get Ingredients** workflow is the sole Spence-to-
+Ingredients write. The dedicated identity receives `rw` access to exactly
+`/srv/jaaaames.com/ingredients/shopping_list.json` through a narrow bridge
+group; it receives no access to Ingredients PHP or credentials and no directory
+create/delete permission.
+
 The current host has a known PHP CLI loader conflict with
 `/usr/local/lib/libsqlite3.so.0`. Until that separate package issue is repaired,
 run the tests with the system library selected explicitly:

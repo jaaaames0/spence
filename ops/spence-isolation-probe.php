@@ -47,11 +47,15 @@ try {
     $check('forge_projection_read', false, get_class($error));
 }
 
+$ingredientsHandle = @fopen('/srv/jaaaames.com/ingredients/shopping_list.json', 'r+');
+$check('ingredients_write_open', is_resource($ingredientsHandle));
+if (is_resource($ingredientsHandle)) fclose($ingredientsHandle);
+
 foreach ([
     'forge_live_db_denied' => '/var/lib/forge/forge.db',
     'forge_credential_denied' => '/etc/forge/access-key',
     'orson_db_denied' => '/srv/jaaaames.com/orson/orson.db',
-    'ingredients_denied' => '/srv/jaaaames.com/ingredients/shopping_list.json',
+    'ingredients_php_denied' => '/srv/jaaaames.com/ingredients/api.php',
     'openrouter_denied' => '/srv/secrets/openrouter.env',
 ] as $name => $path) {
     $check($name, !is_readable($path));

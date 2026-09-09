@@ -35,7 +35,8 @@ profile spence {
   network inet stream,
   network inet6 stream,
 
-  # Enable only after the operator confirms the Get Ingredients workflow.
-  # /srv/jaaaames.com/ingredients/ r,
-  # /srv/jaaaames.com/ingredients/shopping_list.json rwk,
+  # Confirmed recipe-to-shopping-list handoff. This does not grant access to
+  # Ingredients PHP code, its embedded credential, or directory creation.
+  /srv/jaaaames.com/ingredients/ r,
+  /srv/jaaaames.com/ingredients/shopping_list.json rw,
 }
