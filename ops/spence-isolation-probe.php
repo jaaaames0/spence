@@ -51,6 +51,22 @@ $ingredientsHandle = @fopen('/srv/jaaaames.com/ingredients/shopping_list.json', 
 $check('ingredients_write_open', is_resource($ingredientsHandle));
 if (is_resource($ingredientsHandle)) fclose($ingredientsHandle);
 
+$tlsContext = stream_context_create(['ssl' => [
+    'verify_peer' => true,
+    'verify_peer_name' => true,
+    'peer_name' => 'nano-gpt.com',
+]]);
+$tlsSocket = @stream_socket_client(
+    'ssl://nano-gpt.com:443',
+    $networkError,
+    $networkErrorText,
+    10,
+    STREAM_CLIENT_CONNECT,
+    $tlsContext
+);
+$check('nanogpt_tls_connect', is_resource($tlsSocket), is_resource($tlsSocket) ? 'connected' : (string)$networkError);
+if (is_resource($tlsSocket)) fclose($tlsSocket);
+
 foreach ([
     'forge_live_db_denied' => '/var/lib/forge/forge.db',
     'forge_credential_denied' => '/etc/forge/access-key',
