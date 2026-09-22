@@ -6,6 +6,7 @@
 ob_start();
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
+require_once __DIR__ . '/nanogpt_client.php';
 ob_clean();
 header('Content-Type: application/json');
 
@@ -68,7 +69,7 @@ try {
             'additionalProperties' => false
         ];
 
-        $payload = json_encode([
+        $request = [
             'model' => 'google/gemini-3.7-flash',
             'messages' => [[
                 'role' => 'user',
@@ -88,29 +89,11 @@ try {
                     ]
                 ]
             ]
-        ]);
+        ];
 
-        $ch = curl_init('https://nano-gpt.com/api/v1/chat/completions');
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $payload,
-            CURLOPT_TIMEOUT        => 60,
-            CURLOPT_HTTPHEADER     => [
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $api_key
-            ]
-        ]);
-        $response = curl_exec($ch);
-        if (curl_errno($ch)) throw new Exception("Network error: " . curl_error($ch));
-        curl_close($ch);
+        $content = spenceNanoGptChatCompletion($api_key, $request);
 
-        $decoded = json_decode($response, true);
-        $content = $decoded['choices'][0]['message']['content'] ?? null;
-        if (!$content) throw new Exception("AI returned no content. Try again.");
-
-        $items = json_decode($content, true);
-        if (!$items) throw new Exception("Could not parse AI response.");
+        $items = spenceNanoGptDecodeJson($content, $request['model']);
 
         // Normalize: model may return a single object instead of an array
         if (isset($items['name'])) $items = [$items];
@@ -202,5 +185,8 @@ try {
         throw new Exception("Unknown action.");
     }
 } catch (Exception $e) {
-    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    $error = ['status' => 'error', 'message' => $e->getMessage()];
+    $debug = spenceNanoGptDebugDetails($e);
+    if ($debug !== null) $error['debug'] = $debug;
+    echo json_encode($error);
 }

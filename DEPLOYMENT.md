@@ -28,6 +28,14 @@ preparation release safe on the shared pool before cutover. The dedicated pool
 must set the `/etc/spence` paths explicitly. Credential values must not be put
 in FPM environment variables.
 
+NanoGPT failures always return the provider's HTTP status and error message.
+For temporary deeper diagnostics, set `env[SPENCE_AI_DEBUG] = 1` in the active
+Spence PHP-FPM pool and reload PHP-FPM. Error JSON will then also include the
+model, encoded request size, request timing, finish/refusal reason, and at most
+2,000 bytes of the provider response. Return it to `0` after diagnosis; debug
+output may contain model-generated receipt or food text, but never the API key
+or uploaded image.
+
 The retained recipe **Get Ingredients** workflow is the sole Spence-to-
 Ingredients write. The dedicated identity receives `rw` access to exactly
 `/srv/jaaaames.com/ingredients/shopping_list.json` through a narrow bridge

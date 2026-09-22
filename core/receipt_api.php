@@ -8,6 +8,7 @@ ob_start();
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
 require_once __DIR__ . '/receipt_ingest.php';
+require_once __DIR__ . '/nanogpt_client.php';
 ob_clean();
 header('Content-Type: application/json');
 
@@ -76,7 +77,7 @@ try {
         . "Expiry protocol: Only track short-life fresh food. For fresh refrigerated meat/seafood, milk/yogurt/soft cheese, fresh bread/bakery, and fresh fruit/vegetables: if a clear date is visible on the image, return expiry_kind='label' and expiry_date as YYYY-MM-DD. Otherwise return expiry_kind='estimated' with a conservative estimated_shelf_life_days of 1–60 and expiry_date=''. Return expiry_kind='none', expiry_date='', and estimated_shelf_life_days=0 for frozen, canned, dried, jarred, shelf-stable, coffee, sugar, syrup, sauces, cereal, pasta, oil, and all products likely to last over 60 days.\n\n"
         . "Return ONLY a valid JSON array of objects.";
 
-    $payload = json_encode([
+    $request = [
         'model'    => 'google/gemini-3.7-flash',
         'messages' => [[
             'role'    => 'user',
@@ -116,28 +117,11 @@ try {
                 ]
             ]
         ]
-    ]);
+    ];
 
-    $ch = curl_init('https://nano-gpt.com/api/v1/chat/completions');
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => $payload,
-        CURLOPT_TIMEOUT        => 60,
-        CURLOPT_HTTPHEADER     => [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . $api_key,
-        ],
-    ]);
-    $response = curl_exec($ch);
-    if (curl_errno($ch)) throw new Exception("Network error: " . curl_error($ch));
-    curl_close($ch);
+    $content = spenceNanoGptChatCompletion($api_key, $request);
 
-    $decoded = json_decode($response, true);
-    $content = $decoded['choices'][0]['message']['content'] ?? null;
-    if (!$content) throw new Exception("AI returned no content.");
-
-    $items = json_decode($content, true);
+    $items = spenceNanoGptDecodeJson($content, $request['model']);
     if (!is_array($items) || empty($items)) throw new Exception("Could not parse AI response.");
 
     // Write job record for audit trail, then ingest inline
@@ -155,7 +139,10 @@ try {
     ]);
 
 } catch (Exception $e) {
-    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    $error = ['status' => 'error', 'message' => $e->getMessage()];
+    $debug = spenceNanoGptDebugDetails($e);
+    if ($debug !== null) $error['debug'] = $debug;
+    echo json_encode($error);
 }
 
 /**
