@@ -155,6 +155,16 @@ function get_db_connection(?string $dbPath = null): PDO {
         $db->exec('CREATE INDEX IF NOT EXISTS idx_user_goals_effective_date ON user_goals_history(user_id, start_date, created_at)');
     });
 
+    applyDatabaseMigration($db, '009_spice_aliases', function (PDO $db): void {
+        // Receipt names confirmed as an existing rack spice ("Ground Bay Leaf" → Bay Leaves) so later scans route automatically.
+        $db->exec('CREATE TABLE IF NOT EXISTS spice_aliases (
+            raw_name TEXT PRIMARY KEY COLLATE NOCASE,
+            spice_id INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (spice_id) REFERENCES spice_rack(id) ON DELETE CASCADE
+        )');
+    });
+
     return $db;
 }
 

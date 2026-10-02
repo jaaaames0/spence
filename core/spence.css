@@ -47,6 +47,15 @@ body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-ser
 .search-clear:hover { color: #aaa !important; }
 .search-clear.is-visible { display: block; }
 
+/* Type-to-search product picker (core/spence.js attachProductSearch) */
+.product-search-list { max-height: 320px; overflow-y: auto; border: 1px solid #333; border-radius: 4px; background: #151515; }
+.product-search-list.dropdown-style { position: absolute; z-index: 1060; left: 0; right: 0; top: 100%; max-height: 260px; box-shadow: 0 6px 16px rgba(0,0,0,0.6); }
+.product-search-item { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid #262626; cursor: pointer; }
+.product-search-item:last-child { border-bottom: 0; }
+.product-search-item:hover, .product-search-item.active { background: #262626; }
+.product-search-item.active { box-shadow: inset 3px 0 0 #ff9800; }
+.product-search-empty { padding: 0.75rem; text-align: center; color: #666; font-size: 0.85rem; }
+
 /* Modals */
 .modal-content { background: #1e1e1e; border: 1px solid #444; color: #e0e0e0; }
 

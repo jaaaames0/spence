@@ -220,18 +220,16 @@ include '../core/page_head.php';
                     <div class="modal-body">
                         <div class="mb-3">
                             <label class="form-label small fw-bold text-muted uppercase">Product</label>
-                            <input type="text" class="form-control" list="masterProductList" id="manualProductName" placeholder="Search product master..." onchange="updateManualId(this)" required>
+                            <div class="position-relative">
+                                <input type="text" class="form-control" id="manualProductName" placeholder="Search product master..." data-autofocus required>
+                                <div id="manualProductList" class="product-search-list dropdown-style"></div>
+                            </div>
                             <input type="hidden" name="product_id" id="manualProductId">
-                            <datalist id="masterProductList">
-                                <?php foreach ($all_products as $ap): ?>
-                                    <option value="<?= htmlspecialchars($ap['name']) ?>" data-id="<?= $ap['id'] ?>">
-                                <?php endforeach; ?>
-                            </datalist>
                         </div>
                         <div class="row g-2">
                             <div class="col-12 mb-3">
                                 <label class="form-label small fw-bold text-muted uppercase">Qty (<span id="manualUnitLabel" class="text-white">ea</span>)</label>
-                                <input type="number" step="0.001" name="qty" class="form-control" required>
+                                <input type="number" step="0.001" name="qty" id="manualQty" class="form-control" required>
                                 <input type="hidden" name="unit" id="manualUnitInput">
                             </div>
                         </div>
@@ -274,6 +272,24 @@ include '../core/page_head.php';
                     <button type="button" class="btn btn-outline-secondary fw-bold flex-grow-1" data-bs-dismiss="modal">MERGE NONE</button>
                     <button type="button" class="btn btn-primary fw-bold flex-grow-1" onclick="executeSelectedMerges()">MERGE SELECTED</button>
                     <button type="button" class="btn btn-secondary fw-bold flex-grow-1" onclick="mergeAll()">MERGE ALL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Post-scan review of items the AI called spices but that aren't in the rack -->
+    <div class="modal fade" id="spiceReviewModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title fw-black uppercase"><i class="bi bi-fire me-2" style="color:#ff9800;"></i>Possible Spices</h5>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">These were read as spices but don't match anything in your spice rack, so they've been added to stock like normal items. Move any that really are rack spices; the name is remembered for future scans.</p>
+                    <div id="spiceReviewList" class="d-flex flex-column gap-2"></div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button type="button" class="btn btn-secondary w-100 fw-bold uppercase" data-bs-dismiss="modal">Done</button>
                 </div>
             </div>
         </div>
@@ -463,14 +479,15 @@ include '../core/page_head.php';
                         return;
                     }
 
-                    statusAlert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + res.item_count + ' items ingested.';
+                    let notice = res.item_count + ' items ingested.';
+                    if (res.spices_restocked && res.spices_restocked.length) notice += ' Spice rack restocked: ' + res.spices_restocked.join(', ') + '.';
+                    statusAlert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + escHtml(notice);
+                    // Survives the reload below so restocked spices aren't a silent change
+                    sessionStorage.setItem('spenceScanNotice', notice);
 
                     setTimeout(() => {
-                        if (res.potential_merges && res.potential_merges.length > 0) {
-                            showMergeSuggestions(res.potential_merges);
-                        } else {
-                            location.href = 'index.php';
-                        }
+                        if (res.spice_candidates && res.spice_candidates.length) showSpiceReview(res);
+                        else showMergesOrReload(res.potential_merges);
                     }, 1200);
                 })
                 .catch(err => {
@@ -481,7 +498,63 @@ include '../core/page_head.php';
         }
 
 
-        function editRow(id) { document.getElementById('row-'+id).classList.replace('viewing', 'editing'); }
+        const scanNotice = sessionStorage.getItem('spenceScanNotice');
+        if (scanNotice) {
+            sessionStorage.removeItem('spenceScanNotice');
+            const statusAlert = document.getElementById('statusAlert');
+            statusAlert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + escHtml(scanNotice);
+            statusAlert.classList.remove('d-none');
+        }
+
+        function showMergesOrReload(merges, removedProductIds = []) {
+            const remaining = (merges || []).filter(m => !removedProductIds.includes(+m.source_id) && !removedProductIds.includes(+m.target_id));
+            if (remaining.length) showMergeSuggestions(remaining);
+            else location.href = 'index.php';
+        }
+
+        function showSpiceReview(res) {
+            const removedProductIds = [];
+            const list = document.getElementById('spiceReviewList');
+            const options = spiceData.map(sp => `<option value="${sp.id}">Restock: ${escHtml(sp.name)}</option>`).join('');
+            list.innerHTML = res.spice_candidates.map(c => `
+                <div class="p-2 rounded" style="background:#1a1a1a; border:1px solid #333;" data-index="${c.index}">
+                    <div class="fw-bold text-white mb-2">${escHtml(c.product)}</div>
+                    <div class="d-flex gap-2 spice-review-actions">
+                        <select class="form-select form-select-sm">
+                            <option value="">Add as new spice</option>${options}
+                        </select>
+                        <button type="button" class="btn btn-sm fw-bold uppercase text-nowrap" style="background:#ff9800; color:#000;">Move to Rack</button>
+                    </div>
+                </div>`).join('');
+
+            list.querySelectorAll('[data-index]').forEach(row => {
+                row.querySelector('button').addEventListener('click', () => {
+                    const data = new FormData();
+                    data.append('action', 'move_receipt_item_to_spice_rack');
+                    data.append('job_id', res.job_id);
+                    data.append('index', row.dataset.index);
+                    data.append('spice_id', row.querySelector('select').value);
+                    fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(moved => {
+                        if (moved.status !== 'success') return alert('Error: ' + moved.message);
+                        if (moved.product_deleted) removedProductIds.push(+moved.product_id);
+                        row.querySelector('.spice-review-actions').outerHTML =
+                            `<div class="small" style="color:#4caf50;"><i class="bi bi-check-circle-fill me-1"></i>Moved to spice rack as ${escHtml(moved.spice)}</div>`;
+                    });
+                });
+            });
+
+            const modalEl = document.getElementById('spiceReviewModal');
+            modalEl.addEventListener('hidden.bs.modal', () => showMergesOrReload(res.potential_merges, removedProductIds), { once: true });
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        }
+
+        function editRow(id) {
+            const row = document.getElementById('row-'+id);
+            row.classList.replace('viewing', 'editing');
+            const qty = row.querySelector('.edit-qty');
+            qty.focus();
+            qty.select();
+        }
         function cancelEdit(id) { document.getElementById('row-'+id).classList.replace('editing', 'viewing'); }
         function handleKey(e, id) { if(e.key==='Enter') saveRow(id); if(e.key==='Escape') cancelEdit(id); }
         function saveRow(id) {
@@ -520,15 +593,29 @@ include '../core/page_head.php';
             localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
         }
         loadColumnPrefs();
-        function openAddModal() { addInvModal.show(); }
-        function updateManualId(input) {
-            const product = masterProducts.find(p => p.name === input.value);
-            document.getElementById('manualProductId').value = product ? product.id : '';
-            if (product && product.base_unit) {
+        function openAddModal() {
+            document.getElementById('addInventoryForm').reset();
+            document.getElementById('manualProductId').value = '';
+            manualSearch.refresh();
+            addInvModal.show();
+        }
+        const manualNameInput = document.getElementById('manualProductName');
+        const manualSearch = attachProductSearch({
+            input: manualNameInput,
+            list: document.getElementById('manualProductList'),
+            products: masterProducts,
+            meta: p => `<span class="badge bg-secondary opacity-50 text-uppercase" style="font-size:0.65rem;">${escHtml(p.base_unit)}</span>`,
+            onSelect: product => {
+                manualNameInput.value = product.name;
+                document.getElementById('manualProductId').value = product.id;
                 document.getElementById('manualUnitLabel').innerText = product.base_unit;
                 document.getElementById('manualUnitInput').value = product.base_unit;
-            }
-        }
+                document.getElementById('manualQty').focus();
+            },
+        });
+        // Typing after a pick invalidates it; a stale id would add stock to the wrong product
+        manualNameInput.addEventListener('input', () => { document.getElementById('manualProductId').value = ''; });
+        manualNameInput.addEventListener('blur', () => setTimeout(() => { document.getElementById('manualProductList').style.display = 'none'; }, 150));
         function submitManualAdd(e) {
             e.preventDefault();
             const pid = document.getElementById('manualProductId').value;
@@ -643,10 +730,6 @@ include '../core/page_head.php';
                     spiceData = spiceData.filter(s => s.id != id);
                     renderSpices();
                 });
-        }
-
-        function escHtml(s) {
-            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
     </script>
 <?php include '../core/page_foot.php'; ?>

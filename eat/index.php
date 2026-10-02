@@ -84,7 +84,7 @@ include '../core/page_head.php';
             <div class="col-md-3"><h2 class="fw-black uppercase mb-0">Raid Inventory</h2></div>
             <div class="col-md-4">
                 <div class="input-group" style="max-width: 400px;">
-                    <input type="text" id="tableSearch" class="form-control" placeholder="Search by name or category..." oninput="filterCards(this.value)">
+                    <input type="text" id="tableSearch" class="form-control" placeholder="Search by name..." oninput="filterCards(this.value)">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                     <button class="search-clear" type="button" data-clear-target="tableSearch" onclick="clearSearchField('tableSearch')" title="Clear search" aria-label="Clear search"><i class="bi bi-x-lg"></i></button>
                 </div>
@@ -161,7 +161,7 @@ include '../core/page_head.php';
                 <div class="modal-body">
                     <div class="mb-4">
                         <label class="form-label text-muted small text-uppercase fw-bold">Amount to Consume (<span id="unitLabel">ea</span>)</label>
-                        <input type="number" step="0.001" class="form-control form-control-lg fw-bold" id="consumeAmount" placeholder="0.000">
+                        <input type="number" step="0.001" class="form-control form-control-lg fw-bold" id="consumeAmount" placeholder="0.000" data-autofocus>
                         <div class="d-flex justify-content-between mt-2">
                             <div class="text-muted small">Available: <span id="availableQty" class="text-white">0.000</span></div>
                         </div>
@@ -219,16 +219,12 @@ include '../core/page_head.php';
             const q = query.toLowerCase();
             const blocks = document.querySelectorAll('.category-block');
             blocks.forEach(block => {
-                const category = block.dataset.category.toLowerCase();
                 let visibleInBlock = 0;
                 const cols = block.querySelectorAll('.eat-card-col');
-                
-                // If query matches the category name, show everything in block
-                const categoryMatch = category.includes(q);
 
                 cols.forEach(col => {
                     const name = col.querySelector('.product-name').innerText.toLowerCase();
-                    if (categoryMatch || name.includes(q)) {
+                    if (name.includes(q)) {
                         col.style.display = '';
                         visibleInBlock++;
                     } else {
@@ -262,7 +258,6 @@ include '../core/page_head.php';
             else eaBtn.classList.add('d-none');
             
             modal.show();
-            setTimeout(() => amountInput.focus(), 500);
         }
 
         function addAmount(val) {
@@ -394,6 +389,7 @@ include '../core/page_head.php';
                         <i class="bi bi-check-circle-fill" style="color:#4caf50; font-size:2.5rem;"></i>
                         <div class="mt-2 fw-bold text-white">Added to consumption log</div>
                         <div id="qeSuccessMacros" class="mt-2 text-muted small"></div>
+                        <a href="../log/" class="btn btn-sm btn-outline-secondary fw-bold uppercase mt-3"><i class="bi bi-calendar-check me-1"></i>View Log</a>
                     </div>
                 </div>
                 <div class="modal-footer border-0" id="qePhotoFooter">
@@ -413,14 +409,22 @@ include '../core/page_head.php';
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    <!-- Items logged since this modal was opened -->
+                    <div id="qeLoggedBanner" class="mb-3 p-2 px-3 rounded" style="display:none; background:#0f1a10; border:1px solid #2e5d31;">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="small fw-bold uppercase" style="color:#4caf50; letter-spacing:0.5px;"><i class="bi bi-check-circle-fill me-1"></i>Added to consumption log</span>
+                            <a href="../log/" class="small fw-bold text-decoration-none" style="color:#ff9800;">View Log <i class="bi bi-arrow-right"></i></a>
+                        </div>
+                        <div id="qeLoggedList" class="small"></div>
+                    </div>
                     <!-- State 1: Search list -->
                     <div id="qeSearchState">
-                        <div class="input-group mb-3">
-                            <input type="text" id="qeProductSearch" class="form-control" placeholder="Search products..." oninput="filterQeProducts(this.value)" autofocus>
+                        <div class="input-group">
+                            <input type="text" id="qeProductSearch" class="form-control" placeholder="Search products..." data-autofocus>
                             <span class="input-group-text"><i class="bi bi-search"></i></span>
                             <button class="search-clear" type="button" data-clear-target="qeProductSearch" onclick="clearSearchField('qeProductSearch')" title="Clear search" aria-label="Clear search"><i class="bi bi-x-lg"></i></button>
                         </div>
-                        <div id="qeProductList" style="max-height:320px; overflow-y:auto;"></div>
+                        <div id="qeProductList" class="product-search-list mt-2"></div>
                     </div>
                     <!-- State 2: Amount entry -->
                     <div id="qeAmountState" style="display:none;">
@@ -453,11 +457,6 @@ include '../core/page_head.php';
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <div id="qeExSuccessState" class="text-center py-4" style="display:none;">
-                        <i class="bi bi-check-circle-fill" style="color:#4caf50; font-size:2.5rem;"></i>
-                        <div class="mt-2 fw-bold text-white">Added to consumption log</div>
-                        <div id="qeExSuccessMacros" class="mt-2 text-muted small"></div>
                     </div>
                 </div>
                 <div class="modal-footer border-0" id="qeExistingFooter">
@@ -626,45 +625,30 @@ include '../core/page_head.php';
     }
 
     // ---- Existing path ----
+    let qeLogged = [];
+    const qeSearchInput = document.getElementById('qeProductSearch');
+    const qeSearch = attachProductSearch({
+        input: qeSearchInput,
+        list: document.getElementById('qeProductList'),
+        products: qeAllProducts,
+        onSelect: p => selectQeProduct(p.id),
+        meta: p => `<span class="text-muted small uppercase me-2">${escHtml(p.category)}</span><span class="badge bg-secondary opacity-50 text-uppercase" style="font-size:0.65rem;">${escHtml(p.base_unit)}</span>`,
+    });
+
     function openQuickEatExisting() {
+        qeLogged = [];
+        renderQeLogged();
         resetExistingModal();
         qeExistingModal.show();
     }
 
     function resetExistingModal() {
         qeSelectedProduct = null;
-        document.getElementById('qeProductSearch').value = '';
         document.getElementById('qeSearchState').style.display = '';
         document.getElementById('qeAmountState').style.display = 'none';
         document.getElementById('qeExLogBtn').style.display = 'none';
-        document.getElementById('qeExSuccessState').style.display = 'none';
         document.getElementById('qeExistingPreview').style.display = 'none';
-        filterQeProducts('');
-    }
-
-    function filterQeProducts(q) {
-        const query = q.toLowerCase();
-        const list = document.getElementById('qeProductList');
-        const filtered = query
-            ? qeAllProducts.filter(p => p.name.toLowerCase().includes(query) || p.category.toLowerCase().includes(query))
-            : qeAllProducts;
-
-        list.innerHTML = filtered.slice(0, 50).map(p => `
-            <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom border-secondary"
-                 style="cursor:pointer; transition:0.15s;"
-                 onmouseover="this.style.background='#252525'" onmouseout="this.style.background=''"
-                 onclick="selectQeProduct(${p.id})">
-                <div>
-                    <span class="fw-bold text-white">${p.name}</span>
-                    <span class="text-muted small ms-2 uppercase">${p.category}</span>
-                </div>
-                <span class="badge bg-secondary opacity-50 text-uppercase" style="font-size:0.65rem;">${p.base_unit}</span>
-            </div>
-        `).join('');
-
-        if (!filtered.length) {
-            list.innerHTML = '<div class="text-center text-muted p-3 small">No products found.</div>';
-        }
+        qeSearch.clear();
     }
 
     function selectQeProduct(id) {
@@ -677,17 +661,18 @@ include '../core/page_head.php';
         document.getElementById('qeAmountUnit').innerText    = qeSelectedProduct.base_unit;
         document.getElementById('qeAmount').value = '';
         document.getElementById('qeExistingPreview').style.display = 'none';
-        document.getElementById('qeExSuccessState').style.display = 'none';
         document.getElementById('qeAmountState').style.display = '';
         document.getElementById('qeExLogBtn').style.display = '';
         document.getElementById('qeExLogBtn').disabled = true;
-        setTimeout(() => document.getElementById('qeAmount').focus(), 100);
+        document.getElementById('qeAmount').focus();
     }
 
     function backToSearch() {
         document.getElementById('qeAmountState').style.display = 'none';
         document.getElementById('qeExLogBtn').style.display = 'none';
         document.getElementById('qeSearchState').style.display = '';
+        qeSearchInput.focus();
+        qeSearchInput.select();
     }
 
     function updateExistingPreview() {
@@ -709,25 +694,47 @@ include '../core/page_head.php';
         document.getElementById('qeExLogBtn').disabled = false;
     }
 
+    function renderQeLogged() {
+        const banner = document.getElementById('qeLoggedBanner');
+        banner.style.display = qeLogged.length ? '' : 'none';
+        if (!qeLogged.length) return;
+        const line = m => `${Math.round(m.kj)} kJ · ${(+m.protein).toFixed(1)}g P · ${(+m.fat).toFixed(1)}g F · ${(+m.carb).toFixed(1)}g C · $${(+m.cost).toFixed(2)}`;
+        let html = qeLogged.map(e => `
+            <div class="d-flex justify-content-between gap-2">
+                <span class="text-white text-truncate">${escHtml(e.name)} <span class="text-muted">${e.amount} ${escHtml(e.unit)}</span></span>
+                <span class="text-muted text-nowrap">${line(e)}</span>
+            </div>`).join('');
+        if (qeLogged.length > 1) {
+            const total = qeLogged.reduce((t, e) => ({ kj: t.kj + e.kj, protein: t.protein + e.protein, fat: t.fat + e.fat, carb: t.carb + e.carb, cost: t.cost + e.cost }),
+                                          { kj: 0, protein: 0, fat: 0, carb: 0, cost: 0 });
+            html += `<div class="d-flex justify-content-between gap-2 mt-1 pt-1 border-top border-secondary fw-bold">
+                        <span class="text-white">Total</span><span class="text-nowrap" style="color:#ff9800;">${line(total)}</span>
+                     </div>`;
+        }
+        document.getElementById('qeLoggedList').innerHTML = html;
+    }
+
     function logExistingEat() {
         const amount = parseFloat(document.getElementById('qeAmount').value) || 0;
         if (!qeSelectedProduct || amount <= 0) return;
+        const product = qeSelectedProduct;
 
         const data = new FormData();
         data.append('action', 'log_existing');
-        data.append('product_id', qeSelectedProduct.id);
+        data.append('product_id', product.id);
         data.append('amount', amount);
 
         fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
             .then(r => r.json())
             .then(res => {
                 if (res.status !== 'success') { alert('Error: ' + res.message); return; }
-                document.getElementById('qeAmountState').style.display = 'none';
-                document.getElementById('qeExLogBtn').style.display = 'none';
                 const m = res.macros;
-                document.getElementById('qeExSuccessMacros').innerText =
-                    `${m.kj} kJ · ${m.protein}g P · ${m.fat}g F · ${m.carb}g C · $${parseFloat(res.cost).toFixed(2)}`;
-                document.getElementById('qeExSuccessState').style.display = '';
+                qeLogged.push({ name: product.name, amount, unit: product.base_unit,
+                                kj: +m.kj, protein: +m.protein, fat: +m.fat, carb: +m.carb, cost: parseFloat(res.cost) || 0 });
+                renderQeLogged();
+                // Straight back to search so the next item is one keystroke away
+                resetExistingModal();
+                qeSearchInput.focus();
             });
     }
     </script>

@@ -171,7 +171,7 @@ include '../core/page_head.php';
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="mb-3"><label class="form-label small fw-bold text-muted uppercase">Product Name</label><input type="text" name="name" class="form-control" required></div>
+                        <div class="mb-3"><label class="form-label small fw-bold text-muted uppercase">Product Name</label><input type="text" name="name" class="form-control" data-autofocus required></div>
                         <div class="row g-2">
                             <div class="col-6 mb-3">
                                 <label class="form-label small fw-bold text-muted uppercase">Category</label>
@@ -270,7 +270,11 @@ include '../core/page_head.php';
                 else alert('Error: ' + res.message);
             });
         }
-        function editRow(id) { document.getElementById('row-'+id).classList.replace('viewing', 'editing'); }
+        function editRow(id) {
+            const row = document.getElementById('row-'+id);
+            row.classList.replace('viewing', 'editing');
+            row.querySelector('.edit-name').focus();
+        }
         function cancelEdit(id) { document.getElementById('row-'+id).classList.replace('editing', 'viewing'); }
         function handleKey(e, id) { if(e.key==='Enter') saveRow(id); if(e.key==='Escape') cancelEdit(id); }
         function saveRow(id) {

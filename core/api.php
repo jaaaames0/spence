@@ -5,6 +5,7 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
 require_once __DIR__ . '/matching.php';
+require_once __DIR__ . '/receipt_ingest.php';
 header('Content-Type: application/json');
 $db = get_db_connection();
 
@@ -297,6 +298,11 @@ try {
         $spice_id = $db->lastInsertId() ?: $db->query("SELECT id FROM spice_rack WHERE name = " . $db->quote($name))->fetchColumn();
         $spice = $db->query("SELECT * FROM spice_rack WHERE id = $spice_id")->fetch(PDO::FETCH_ASSOC);
         echo json_encode(['status' => 'success', 'spice' => $spice]);
+
+    } elseif ($action === 'move_receipt_item_to_spice_rack') {
+        $spiceId = (int)($_POST['spice_id'] ?? 0);
+        $moved = moveReceiptItemToSpiceRack($db, (int)($_POST['job_id'] ?? 0), (int)($_POST['index'] ?? -1), $spiceId ?: null);
+        echo json_encode(['status' => 'success'] + $moved);
 
     } elseif ($action === 'toggle_spice') {
         $spice_id = (int)($_POST['spice_id'] ?? 0);

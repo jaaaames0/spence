@@ -203,7 +203,7 @@ include '../core/page_head.php';
                             <div class="col-md-9">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <label class="form-label small fw-bold text-muted uppercase mb-0">Ingredients</label>
-                                    <button type="button" class="btn btn-sm btn-outline-info fw-bold" onclick="addIngredientRow()">ADD</button>
+                                    <button type="button" class="btn btn-sm btn-outline-info fw-bold" onclick="addIngredientRow(null, true)">ADD</button>
                                 </div>
                                 <div id="ingredientList"></div>
                             </div>
@@ -304,6 +304,7 @@ include '../core/page_head.php';
             updateTagPills('');
             addIngredientRow();
             loadSpiceCheckboxes(null);
+            document.getElementById('recipeModal').addEventListener('shown.bs.modal', () => document.getElementById('modalName').focus(), { once: true });
             recipeModal.show();
         }
 
@@ -326,16 +327,15 @@ include '../core/page_head.php';
             recipeModal.show();
         }
 
-        function addIngredientRow(ing = null) {
+        function addIngredientRow(ing = null, focus = false) {
             const div = document.createElement('div');
             div.className = 'ingredient-row d-flex align-items-center gap-1 mb-1';
             div.dataset.productId = ing ? (ing.product_id || '') : '';
             div.innerHTML = `
                 <div style="flex:1 1 0; min-width:0; position:relative;">
                     <input type="text" name="ing_product[]" class="form-control form-control-sm ing-search"
-                           placeholder="Ingredient..." value="${ing ? escHtml(ing.product_name) : ''}"
-                           oninput="showAcDropdown(this)" onblur="hideAcDropdown(this)" autocomplete="off" required>
-                    <div class="ac-dropdown list-group" style="display:none; position:absolute; z-index:1050; width:100%; max-height:220px; overflow-y:auto; top:100%; left:0;"></div>
+                           placeholder="Ingredient..." value="${ing ? escHtml(ing.product_name) : ''}" required>
+                    <div class="ac-dropdown product-search-list dropdown-style"></div>
                 </div>
                 <div style="flex:0 0 60px;">
                     <input type="number" step="0.001" name="ing_amount[]" class="form-control form-control-sm ing-amount"
@@ -366,45 +366,24 @@ include '../core/page_head.php';
             `;
             document.getElementById('ingredientList').appendChild(div);
 
+            const search = div.querySelector('.ing-search');
+            const dropdown = div.querySelector('.ac-dropdown');
+            attachProductSearch({
+                input: search,
+                list: dropdown,
+                products: productData,
+                limit: 10,
+                meta: p => p.stock_qty > 0 ? `<span style="color:#4caf50; font-size:0.65rem; white-space:nowrap;">${fmtQty(p.stock_qty)} ${escHtml(p.base_unit)}</span>` : '',
+                onSelect: p => selectIngredient(div, p.id),
+            });
+            search.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 150));
+            if (focus) search.focus();
+
             // If editing an existing ingredient, populate the stock button immediately
             if (ing && ing.product_id) {
                 const product = productData.find(p => p.id == ing.product_id);
                 if (product) setStockBtn(div, product);
             }
-        }
-
-        function escHtml(str) {
-            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }
-
-        // ---- Autocomplete ----
-        function showAcDropdown(input) {
-            const q = input.value.trim().toLowerCase();
-            const dropdown = input.nextElementSibling;
-            if (q.length < 1) { dropdown.style.display = 'none'; return; }
-
-            const matches = productData.filter(p => p.name.toLowerCase().includes(q)).slice(0, 10);
-            if (!matches.length) { dropdown.style.display = 'none'; return; }
-
-            dropdown.innerHTML = matches.map(p => {
-                const stock = p.stock_qty > 0
-                    ? `<span style="color:#4caf50; font-size:0.65rem; white-space:nowrap;">${fmtQty(p.stock_qty)} ${p.base_unit}</span>`
-                    : '';
-                return `<button type="button" class="list-group-item list-group-item-action py-1 px-2 d-flex align-items-center justify-content-between gap-2"
-                                style="background:#2a2a2a; border-color:#444; color:#ddd; font-size:0.85rem;"
-                                onmousedown="selectIngredient(this.closest('.ingredient-row'), ${p.id})">
-                            <span>${escHtml(p.name)}</span>${stock}
-                        </button>`;
-            }).join('');
-            dropdown.style.display = 'block';
-        }
-
-        function hideAcDropdown(input) {
-            // Delay so onmousedown on a dropdown item fires first
-            setTimeout(() => {
-                const dropdown = input.nextElementSibling;
-                if (dropdown) dropdown.style.display = 'none';
-            }, 200);
         }
 
         function selectIngredient(row, productId) {

@@ -73,7 +73,8 @@ try {
         . "   - 'kg' / 'L' (Weight/Volume): Use for items consumed in partial portions (cheese, deli meats, yogurt tubs, oil).\n"
         . "     - Example: 'Burger Slices 200g' -> product='Burger Slices', unit='kg', amount=0.200, weight_per_ea=1.0.\n"
         . "     - Example: 'Olive Oil 750ml' -> product='Olive Oil', unit='L', amount=0.750, weight_per_ea=1.0.\n\n"
-        . "Category note: Use 'Spice/Herb' for any dried spices, herbs, seasoning blends, or condiment sachets.\n\n"
+        . "Category note: Use 'Spice/Herb' ONLY for single dried spices or herbs sold in a jar or packet for the spice rack (e.g. Ground Cumin, Paprika, Dried Oregano, Black Peppercorns). "
+        . "Meal kits, recipe bases, curry/spice pastes, marinades, sauces, stock cubes, gravy, and seasoning sachets for a specific dish (e.g. 'Tikka Masala Meal Kit', 'Taco Seasoning Kit', 'Laksa Paste') are NOT Spice/Herb; use 'Other'.\n\n"
         . "Expiry protocol: Only track short-life fresh food. For fresh refrigerated meat/seafood, milk/yogurt/soft cheese, fresh bread/bakery, and fresh fruit/vegetables: if a clear date is visible on the image, return expiry_kind='label' and expiry_date as YYYY-MM-DD. Otherwise return expiry_kind='estimated' with a conservative estimated_shelf_life_days of 1–60 and expiry_date=''. Return expiry_kind='none', expiry_date='', and estimated_shelf_life_days=0 for frozen, canned, dried, jarred, shelf-stable, coffee, sugar, syrup, sauces, cereal, pasta, oil, and all products likely to last over 60 days.\n\n"
         . "Return ONLY a valid JSON array of objects.";
 
@@ -132,10 +133,20 @@ try {
 
     $result = ingestReceiptItems($db, $items, $job_id);
 
+    $spiceCandidates = [];
+    $spicesRestocked = [];
+    foreach ($result['item_results'] as $index => $itemResult) {
+        if (!empty($itemResult['spice_candidate'])) $spiceCandidates[] = ['index' => $index, 'product' => $itemResult['product']];
+        if ($itemResult['status'] === 'spice_restocked') $spicesRestocked[] = $itemResult['spice'];
+    }
+
     echo json_encode([
         'status'           => 'success',
+        'job_id'           => $job_id,
         'item_count'       => count($items),
         'potential_merges' => $result['potential_merges'],
+        'spice_candidates' => $spiceCandidates,
+        'spices_restocked' => array_values(array_unique($spicesRestocked)),
     ]);
 
 } catch (Exception $e) {

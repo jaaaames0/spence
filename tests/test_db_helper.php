@@ -31,7 +31,7 @@ try {
     $db = get_db_connection($path);
     $columns = $db->query('PRAGMA table_info(consumption_log)')->fetchAll(PDO::FETCH_COLUMN, 1);
     assertSameValue(true, in_array('quick_eat_weight_per_ea', $columns, true), 'Quick Eat migration was not applied');
-    assertSameValue(8, (int)$db->query('SELECT COUNT(*) FROM schema_migrations')->fetchColumn(), 'Unexpected migration count');
+    assertSameValue(9, (int)$db->query('SELECT COUNT(*) FROM schema_migrations')->fetchColumn(), 'Unexpected migration count');
     assertSameValue('idx_inventory_product_location', $db->query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_inventory_product_location'")->fetchColumn(), 'Inventory index was not created');
     $goalColumns = $db->query('PRAGMA table_info(user_goals_history)')->fetchAll(PDO::FETCH_COLUMN, 1);
     assertSameValue(true, in_array('regime', $goalColumns, true), 'Historical plan context migration was not applied');

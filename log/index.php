@@ -241,7 +241,7 @@ include '../core/page_head.php';
                     <div class="modal-body">
                         <div id="quickEatEditName" class="fw-bold text-white mb-3"></div>
                         <label for="quickEatEditAmount" class="form-label small fw-bold text-muted uppercase">Amount (<span id="quickEatEditUnit"></span>)</label>
-                        <input type="number" min="0.001" step="0.001" class="form-control form-control-lg fw-bold" id="quickEatEditAmount" onkeydown="if(event.key === 'Enter') { event.preventDefault(); saveQuickEatEdit(); }">
+                        <input type="number" min="0.001" step="0.001" class="form-control form-control-lg fw-bold" id="quickEatEditAmount" data-autofocus onkeydown="if(event.key === 'Enter') { event.preventDefault(); saveQuickEatEdit(); }">
                         <div class="form-text text-muted">Macros will be recalculated from the nutrition captured when this was logged. Inventory is not affected.</div>
                     </div>
                     <div class="modal-footer border-secondary">

@@ -49,24 +49,22 @@ include '../core/page_head.php';
                     <div class="row g-2 align-items-end">
                         <div class="col-md-4">
                             <label class="small text-muted mb-1 uppercase fw-bold">Source (Messy)</label>
-                            <select id="manualSource" class="form-select">
-                                <option value="">Select product...</option>
-                                <?php foreach ($products as $p): ?>
-                                    <option value="<?= $p['id'] ?>"><?= htmlspecialchars($p['name']) ?> (#<?= $p['id'] ?>)</option>
-                                <?php endforeach; ?>
-                            </select>
+                            <div class="position-relative">
+                                <input type="text" id="manualSourceName" class="form-control" placeholder="Search products...">
+                                <div id="manualSourceList" class="product-search-list dropdown-style"></div>
+                            </div>
+                            <input type="hidden" id="manualSource">
                         </div>
                         <div class="col-md-1 text-center pb-2">
                             <i class="bi bi-arrow-right h4 text-muted"></i>
                         </div>
                         <div class="col-md-4">
                             <label class="small text-muted mb-1 uppercase fw-bold">Target (Canonical)</label>
-                            <select id="manualTarget" class="form-select">
-                                <option value="">Select product...</option>
-                                <?php foreach ($products as $p): ?>
-                                    <option value="<?= $p['id'] ?>"><?= htmlspecialchars($p['name']) ?> (#<?= $p['id'] ?>)</option>
-                                <?php endforeach; ?>
-                            </select>
+                            <div class="position-relative">
+                                <input type="text" id="manualTargetName" class="form-control" placeholder="Search products...">
+                                <div id="manualTargetList" class="product-search-list dropdown-style"></div>
+                            </div>
+                            <input type="hidden" id="manualTarget">
                         </div>
                         <div class="col-md-3">
                             <button class="btn btn-primary-spence w-100 fw-bold py-2" onclick="forceMerge()">MERGE PRODUCTS</button>
@@ -139,13 +137,32 @@ include '../core/page_head.php';
     </div>
 
     <script>
+    const mergeProducts = <?= json_encode(array_map(fn($p) => ['id' => (int)$p['id'], 'name' => $p['name']], $products)) ?>;
+    ['Source', 'Target'].forEach(key => {
+        const input = document.getElementById(`manual${key}Name`);
+        const idField = document.getElementById(`manual${key}`);
+        const list = document.getElementById(`manual${key}List`);
+        attachProductSearch({
+            input, list,
+            products: mergeProducts,
+            meta: p => `<span class="text-muted small">#${p.id}</span>`,
+            onSelect: p => {
+                input.value = p.name;
+                idField.value = p.id;
+                if (key === 'Source') document.getElementById('manualTargetName').focus();
+            },
+        });
+        input.addEventListener('input', () => { idField.value = ''; });
+        input.addEventListener('blur', () => setTimeout(() => { list.style.display = 'none'; }, 150));
+    });
+
     function forceMerge() {
         const sourceId = document.getElementById('manualSource').value;
         const targetId = document.getElementById('manualTarget').value;
         if (!sourceId || !targetId) return alert('Select both products.');
         if (sourceId === targetId) return alert('Cannot merge a product into itself.');
-        const sourceName = document.getElementById('manualSource').options[document.getElementById('manualSource').selectedIndex].text;
-        const targetName = document.getElementById('manualTarget').options[document.getElementById('manualTarget').selectedIndex].text;
+        const sourceName = `${document.getElementById('manualSourceName').value} (#${sourceId})`;
+        const targetName = `${document.getElementById('manualTargetName').value} (#${targetId})`;
         merge(sourceId, targetId, sourceName, targetName);
     }
     function merge(sourceId, targetId, sourceName, targetName) {
