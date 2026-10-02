@@ -2,6 +2,11 @@
 /** Historical energy-balance estimator. Results are guidance, not medical advice. */
 require_once __DIR__ . '/forge.php';
 
+/** Energy per kg of body-weight change; assumes the change is fat tissue. */
+const ENERGY_KJ_PER_KG = 32000;
+/** An estimate is high confidence once one standard error is within this many kJ/day. */
+const ENERGY_HIGH_CONFIDENCE_KJ = 600;
+
 function detectEnergyRegime(array $points): array {
     $count = count($points);
     if ($count < 3) return ['label' => 'building', 'active_start' => $points[0]['day'] ?? null, 'segments' => []];
@@ -12,7 +17,6 @@ function detectEnergyRegime(array $points): array {
     $highIndex = $lowIndex = 0;
     $turnIndex = null;
     $segments = [];
-    $hadReversal = false;
     $pending = null;
 
     $daysBetween = static fn(int $from, int $to): float =>
@@ -30,9 +34,15 @@ function detectEnergyRegime(array $points): array {
             if ($cutConfirmed) {
                 $direction = 'cut';
                 $turnIndex = $lowIndex;
+                $activeStartIndex = $highIndex;
             } elseif ($bulkConfirmed) {
                 $direction = 'bulk';
                 $turnIndex = $highIndex;
+                $activeStartIndex = $lowIndex;
+            }
+            // Weight held within the reversal band before the phase began: that stretch was maintenance
+            if ($direction !== null && $activeStartIndex > 0) {
+                $segments[] = ['label' => 'maintenance', 'start' => $points[0]['day'], 'end' => $points[$activeStartIndex]['day']];
             }
             continue;
         }
@@ -69,7 +79,6 @@ function detectEnergyRegime(array $points): array {
         $activeStartIndex = $i;
         $turnIndex = $i;
         $pending = null;
-        $hadReversal = true;
     }
 
     if ($direction === null) {
@@ -84,7 +93,7 @@ function detectEnergyRegime(array $points): array {
         return ['label' => 'transition', 'active_start' => $points[$pending['turn']]['day'], 'segments' => $transitionSegments];
     }
 
-    if ($hadReversal) $segments[] = ['label' => $direction, 'start' => $points[$activeStartIndex]['day'], 'end' => $points[$count - 1]['day']];
+    if ($segments) $segments[] = ['label' => $direction, 'start' => $points[$activeStartIndex]['day'], 'end' => $points[$count - 1]['day']];
     return ['label' => $direction, 'active_start' => $points[$activeStartIndex]['day'], 'segments' => $segments];
 }
 
@@ -146,17 +155,38 @@ function calculateEnergyWindow(array $points, array $intake, array $excluded, st
     $coverage = $calendarDays ? count($included) / $calendarDays : 0;
     $avgIntake = $included ? array_sum($included) / count($included) : 0;
 
-    $n = count($points); $slope = null;
+    $n = count($points); $slope = null; $slopeError = null;
     if ($n >= 2) {
-        $x = $y = $xx = $xy = 0.0; $origin = strtotime($points[0]['day']);
-        foreach ($points as $point) { $dx = (strtotime($point['day']) - $origin) / 86400; $x += $dx; $y += $point['weight']; $xx += $dx * $dx; $xy += $dx * $point['weight']; }
-        $denominator = $n * $xx - $x * $x;
-        if ($denominator > 0) $slope = ($n * $xy - $x * $y) / $denominator;
+        $origin = strtotime($points[0]['day']);
+        $xs = array_map(fn($point) => (strtotime($point['day']) - $origin) / 86400, $points);
+        $ys = array_column($points, 'weight');
+        $meanX = array_sum($xs) / $n; $meanY = array_sum($ys) / $n;
+        $sxx = $sxy = 0.0;
+        foreach ($xs as $i => $dx) { $sxx += ($dx - $meanX) ** 2; $sxy += ($dx - $meanX) * ($ys[$i] - $meanY); }
+        if ($sxx > 0) {
+            $slope = $sxy / $sxx;
+            if ($n >= 3) {
+                $residuals = 0.0;
+                foreach ($xs as $i => $dx) $residuals += ($ys[$i] - ($meanY + $slope * ($dx - $meanX))) ** 2;
+                $slopeError = sqrt($residuals / ($n - 2) / $sxx);
+            }
+        }
     }
     $usable = $slope !== null && $n >= 3 && $calendarDays >= 14 && count($included) >= 10 && $coverage >= 0.5;
-    $tdee = $usable ? $avgIntake - ($slope * 32000) : null;
-    $confidence = !$usable ? 'building' : ($calendarDays >= 42 && $coverage >= 0.8 && $n >= 6 ? 'high' : 'medium');
-    return compact('tdee', 'avgIntake', 'slope', 'coverage', 'calendarDays', 'points', 'included', 'confidence');
+    $tdee = $usable ? $avgIntake - ($slope * ENERGY_KJ_PER_KG) : null;
+
+    // One standard error of the estimate: weight-trend noise plus day-to-day intake noise
+    $uncertainty = null;
+    if ($usable) {
+        $values = array_values($included);
+        $intakeVariance = 0.0;
+        foreach ($values as $kj) $intakeVariance += ($kj - $avgIntake) ** 2;
+        $intakeError = sqrt($intakeVariance / (count($values) - 1) / count($values));
+        $uncertainty = sqrt(($slopeError * ENERGY_KJ_PER_KG) ** 2 + $intakeError ** 2);
+    }
+    $confidence = !$usable ? 'building'
+        : ($calendarDays >= 28 && $coverage >= 0.8 && $n >= 6 && $uncertainty <= ENERGY_HIGH_CONFIDENCE_KJ ? 'high' : 'medium');
+    return compact('tdee', 'uncertainty', 'avgIntake', 'slope', 'coverage', 'calendarDays', 'points', 'included', 'confidence');
 }
 
 /** Return the transition end and first weight that is eligible for calibration. */
@@ -169,28 +199,56 @@ function getPostTransitionCalibrationStart(array $points, string $phaseStart, in
     return ['transition_end' => $transitionEnd, 'calibration_start' => $calibrationStart];
 }
 
+/**
+ * The newest high-confidence estimate from a phase that ended before the current one. Detection is
+ * anchored to the current phase's start, not today, so the result stays fixed for the whole phase
+ * instead of shifting as older history ages out of a rolling window.
+ */
+function findLastStableEnergyEstimate(array $points, array $intake, array $excluded, string $phaseStart, int $lookbackDays = 180): array {
+    $historyStart = date('Y-m-d', strtotime($phaseStart . " -{$lookbackDays} days"));
+    $points = array_values(array_filter($points, fn($point) => $point['day'] >= $historyStart));
+    $tdee = null; $regime = null;
+    foreach (detectEnergyRegime($points)['segments'] ?? [] as $segment) {
+        if ($segment['label'] === 'transition' || $segment['end'] >= $phaseStart) continue;
+        $previous = calculateEnergyWindow($points, $intake, $excluded, $segment['start'], $segment['end']);
+        if ($previous['confidence'] !== 'high') continue;
+        $tdee = $previous['tdee'];
+        $regime = $segment;
+    }
+    return ['tdee' => $tdee, 'regime' => $regime];
+}
+
+/** Whether a prior phase's maintenance estimate can stand in for the current phase's. */
+function priorEnergyEstimateApplies(string $currentLabel, string $priorLabel): bool {
+    $opposite = ['cut' => 'bulk', 'bulk' => 'cut'];
+    return ($opposite[$currentLabel] ?? null) !== $priorLabel;
+}
+
 function getEnergyCalibration(PDO $db, int $lookbackDays = 180): array {
     $start = date('Y-m-d', strtotime("-{$lookbackDays} days"));
+    // Prior-phase estimates look back from the current phase start, so fetch enough history to cover it
+    $historyStart = date('Y-m-d', strtotime('-' . ($lookbackDays * 2) . ' days'));
     $tz = SPENCE_TIMEZONE_OFFSET;
     $stmt = $db->prepare("SELECT DATE(consumed_at, '{$tz}') AS day, SUM(kj) AS intake_kj
         FROM consumption_log WHERE DATE(consumed_at, '{$tz}') >= ? GROUP BY day");
-    $stmt->execute([$start]);
+    $stmt->execute([$historyStart]);
     $intake = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'intake_kj', 'day');
-    $excluded = array_flip($db->query("SELECT day FROM energy_day_exclusions WHERE day >= " . $db->quote($start))->fetchAll(PDO::FETCH_COLUMN));
+    $excluded = array_flip($db->query("SELECT day FROM energy_day_exclusions WHERE day >= " . $db->quote($historyStart))->fetchAll(PDO::FETCH_COLUMN));
 
     $weights = [];
     $userId = $db->query('SELECT id FROM user_profiles LIMIT 1')->fetchColumn();
     if ($userId) {
         $stmt = $db->prepare("SELECT DATE(recorded_at, '{$tz}') AS day, weight_kg FROM user_vitals_history WHERE user_id = ? AND weight_kg IS NOT NULL AND DATE(recorded_at, '{$tz}') >= ?");
-        $stmt->execute([$userId, $start]);
+        $stmt->execute([$userId, $historyStart]);
         $weights = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
-    foreach (getForgeVitalsHistory() as $v) if ($v['weight_kg'] !== null && substr($v['local_recorded_at'], 0, 10) >= $start) $weights[] = ['day' => substr($v['local_recorded_at'], 0, 10), 'weight_kg' => $v['weight_kg']];
+    foreach (getForgeVitalsHistory() as $v) if ($v['weight_kg'] !== null && substr($v['local_recorded_at'], 0, 10) >= $historyStart) $weights[] = ['day' => substr($v['local_recorded_at'], 0, 10), 'weight_kg' => $v['weight_kg']];
     $byDay = [];
     foreach ($weights as $weight) $byDay[$weight['day']][] = (float)$weight['weight_kg'];
     ksort($byDay);
-    $allPoints = [];
-    foreach ($byDay as $day => $values) $allPoints[] = ['day' => $day, 'weight' => array_sum($values) / count($values)];
+    $historyPoints = [];
+    foreach ($byDay as $day => $values) $historyPoints[] = ['day' => $day, 'weight' => array_sum($values) / count($values)];
+    $allPoints = array_values(array_filter($historyPoints, fn($point) => $point['day'] >= $start));
 
     $detectedRegime = detectEnergyRegime($allPoints);
     $lastObservedWeightDay = $allPoints ? $allPoints[count($allPoints) - 1]['day'] : null;
@@ -209,19 +267,23 @@ function getEnergyCalibration(PDO $db, int $lookbackDays = 180): array {
 
     $window = $calibrationStart
         ? calculateEnergyWindow($allPoints, $intake, $excluded, $calibrationStart, $lastObservedWeightDay)
-        : ['tdee' => null, 'avgIntake' => 0, 'slope' => null, 'coverage' => 0, 'calendarDays' => 0, 'points' => [], 'included' => [], 'confidence' => 'building'];
+        : ['tdee' => null, 'uncertainty' => null, 'avgIntake' => 0, 'slope' => null, 'coverage' => 0, 'calendarDays' => 0, 'points' => [], 'included' => [], 'confidence' => 'building'];
     extract($window);
 
-    $lastStableTdee = null; $lastStableRegime = null;
-    foreach ($detectedRegime['segments'] ?? [] as $segment) {
-        if ($segment['label'] === 'transition' || $segment['end'] >= $phaseStart) continue;
-        $previous = calculateEnergyWindow($allPoints, $intake, $excluded, $segment['start'], $segment['end']);
-        if ($previous['confidence'] !== 'high') continue;
-        $lastStableTdee = $previous['tdee'];
-        $lastStableRegime = $segment;
+    $lastStable = findLastStableEnergyEstimate($historyPoints, $intake, $excluded, $phaseStart, $lookbackDays);
+    $lastStableTdee = $lastStable['tdee'];
+    $lastStableRegime = $lastStable['regime'];
+    // Maintenance on a 20 MJ/day bulk says little about maintenance on a cut (and vice versa), so an
+    // opposite-direction prior is reported but never used; targets fall back to the formula instead.
+    $lastStableSkipped = null;
+    if ($lastStableRegime && !priorEnergyEstimateApplies($regime['label'], $lastStableRegime['label'])) {
+        $lastStableSkipped = ['tdee' => $lastStableTdee, 'regime' => $lastStableRegime];
+        $lastStableTdee = null;
+        $lastStableRegime = null;
     }
     $workouts = array_values(array_filter(getForgeWorkoutHistory(), fn($w) => $w['day'] >= $start && $w['day'] <= ($lastObservedWeightDay ?: date('Y-m-d'))));
-    return compact('tdee', 'avgIntake', 'slope', 'coverage', 'calendarDays', 'points', 'included', 'excluded', 'confidence', 'workouts', 'regime', 'lastStableTdee', 'lastStableRegime');
+    $excluded = array_filter($excluded, fn($day) => $day >= $start, ARRAY_FILTER_USE_KEY);
+    return compact('tdee', 'uncertainty', 'avgIntake', 'slope', 'coverage', 'calendarDays', 'points', 'included', 'excluded', 'confidence', 'workouts', 'regime', 'lastStableTdee', 'lastStableRegime', 'lastStableSkipped');
 }
 
 function getAdaptiveEnergyTarget(PDO $db, string $day, float $fallback): array {

@@ -79,6 +79,53 @@ $detected = ['label' => 'bulk', 'active_start' => '2026-06-01', 'segments' => []
 $regime = applyEnergyRegimeHint($detected, $staleHint, $intake, '2026-08-23');
 assertEnergyValue($detected, $regime, 'A stale Forge cycle should not override local detection');
 
+// Last stable estimate must not drift as today advances and early history leaves the rolling window
+$history = []; $historyIntake = [];
+for ($d = 0; $d <= 330; $d++) {
+    $day = date('Y-m-d', strtotime("2026-01-01 +{$d} days"));
+    // 100 days maintenance at 80 kg, 140 days bulk (+0.5 kg/week), then a cut (-0.8 kg/week)
+    $weight = $d < 100 ? 80 : ($d < 240 ? 80 + ($d - 100) * 0.5 / 7 : 90 - ($d - 240) * 0.8 / 7);
+    $historyIntake[$day] = $d < 100 ? 12000 : ($d < 240 ? 14500 : 8500);
+    if ($d % 3 === 0) $history[] = weightPoint($day, $weight);
+}
+$cutStart = '2026-09-02';
+$stableEarly = findLastStableEnergyEstimate(array_values(array_filter($history, fn($p) => $p['day'] >= '2026-01-01')), $historyIntake, [], $cutStart);
+$stableLater = findLastStableEnergyEstimate(array_values(array_filter($history, fn($p) => $p['day'] >= '2026-02-20')), $historyIntake, [], $cutStart);
+assertEnergyValue(true, $stableEarly['tdee'] !== null, 'A completed bulk should yield a last stable estimate');
+assertEnergyValue($stableEarly, $stableLater, 'Last stable estimate drifted when unrelated older history was dropped');
+
+// A first phase begins at its turning point; the flat stretch before it is maintenance
+$maintenanceThenBulk = [
+    weightPoint('2026-01-01', 80.0), weightPoint('2026-01-20', 80.5), weightPoint('2026-02-10', 79.8),
+    weightPoint('2026-03-01', 80.2), weightPoint('2026-03-20', 82.0), weightPoint('2026-04-10', 84.0),
+];
+$regime = detectEnergyRegime($maintenanceThenBulk);
+assertEnergyValue('bulk', $regime['label'], 'A rise after a flat stretch should be a bulk');
+assertEnergyValue('2026-02-10', $regime['active_start'], 'The bulk should start at its low point, not the first weigh-in');
+assertEnergyValue(['label' => 'maintenance', 'start' => '2026-01-01', 'end' => '2026-02-10'], $regime['segments'][0], 'The flat stretch should be recorded as maintenance');
+
+// Confidence follows the estimate's uncertainty, not a fixed number of days
+$steadyCut = []; $noisyCut = []; $cutIntake = [];
+for ($d = 0; $d < 30; $d++) {
+    $day = date('Y-m-d', strtotime("2026-08-23 +{$d} days"));
+    $cutIntake[$day] = 8000 + ($d % 2 ? 300 : -300);
+    if ($d % 4 === 0) {
+        $steadyCut[] = weightPoint($day, 88 - $d * 0.19 + ($d % 8 ? 0.2 : -0.2));
+        $noisyCut[] = weightPoint($day, 88 - $d * 0.19 + ($d % 8 ? 2.0 : -2.0));
+    }
+}
+$steady = calculateEnergyWindow($steadyCut, $cutIntake, [], '2026-08-23');
+assertEnergyValue('high', $steady['confidence'], 'A tight 30-day trend should be high confidence');
+assertEnergyValue(true, $steady['uncertainty'] < ENERGY_HIGH_CONFIDENCE_KJ, 'Steady trend uncertainty should be small');
+assertEnergyValue('medium', calculateEnergyWindow($noisyCut, $cutIntake, [], '2026-08-23')['confidence'], 'A noisy trend over the same days should stay medium');
+assertEnergyValue('medium', calculateEnergyWindow(array_slice($steadyCut, 0, 5), $cutIntake, [], '2026-08-23', '2026-09-08')['confidence'], 'Under 28 days should stay medium however tight');
+
+// A bulk's maintenance estimate never stands in during a cut, and vice versa
+assertEnergyValue(false, priorEnergyEstimateApplies('cut', 'bulk'), 'Bulk estimate must not drive cut targets');
+assertEnergyValue(false, priorEnergyEstimateApplies('bulk', 'cut'), 'Cut estimate must not drive bulk targets');
+assertEnergyValue(true, priorEnergyEstimateApplies('cut', 'maintenance'), 'Maintenance estimate is a fair prior for a cut');
+assertEnergyValue(true, priorEnergyEstimateApplies('transition', 'bulk'), 'The phase being left still applies while a change is unconfirmed');
+
 assertEnergyValue('orange', getNutritionTargetZone('energy', 9500, 10000, 'bulk'), 'Bulk energy should remain orange below target');
 assertEnergyValue('green', getNutritionTargetZone('energy', 11000, 10000, 'bulk'), 'Bulk energy should reward a bounded surplus');
 assertEnergyValue('green', getNutritionTargetZone('energy', 9000, 10000, 'cut'), 'Cut energy should reward a bounded undershoot');

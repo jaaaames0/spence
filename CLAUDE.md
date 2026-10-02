@@ -55,12 +55,18 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 
 **Spice Rack** (`spice_rack` + `recipe_spices` tables): Binary is_stocked state for pantry staples. 18 canonical spices seeded on boot via `INSERT OR IGNORE` in `get_db_connection()`. Uses counter increments on each cook; `restock_flagged` at 40 uses. Surfaces: Stock modal (bi-fire toolbar button), RecipeDB inline checkboxes, Cook spice check panel.
 
-**Receipt AI routing**: Items classified as `Spice/Herb` by the vision model are routed to `spice_rack` (insert or restock) instead of inventory.
+**Receipt AI routing**: Items classified as `Spice/Herb` are routed to `spice_rack` only if the name matches a rack spice (qualifiers like "Ground" ignored) or a confirmed alias in `spice_aliases`. Unmatched ones (meal kits, pastes) are stocked as `Other` and flagged in a post-scan review on Stock, where moving one to the rack reverses its inventory line and remembers the name.
+
+**Receipt expiry merging**: When a receipt restocks an existing inventory row, a dated new purchase replaces the row's expiry (restocks happen when stock is low; rotation makes the new date correct quickly). Undated purchases leave an in-stock date alone (`mergeInventoryExpiry()` in `receipt_ingest.php`).
+
+**Energy calibration** (`core/energy_calibration.php`): Maintenance = average intake − weight-trend slope × `ENERGY_KJ_PER_KG` over the current phase, after a 14-day transition when Forge supplies the cycle. Confidence is "high" when the estimate's standard error is within `ENERGY_HIGH_CONFIDENCE_KJ` (plus 28+ days, 6+ weigh-ins, 80% coverage). The prior-phase "last stable" estimate is anchored to the current phase start (not today), and is never used across a bulk↔cut flip; targets use the formula instead.
+
+**Shared UI helpers** (`core/spence.js`, loaded in `page_head.php`): `data-autofocus` focuses a field when its modal opens; `attachProductSearch()` is the type-to-search product picker (name-only, empty until typing, ↑/↓/Enter). Use it instead of `<datalist>`/`<select>` for product lists.
 
 **Mobile layout**: `core/spence.css` contains all responsive overrides. `d-none d-md-table-cell` hides secondary table columns on mobile. `.mob-detail-row` expands per-row detail on mobile (suppressed via CSS at md+). Section headers use Bootstrap `col-6 col-md-*` for inline heading+date on log pages.
 
 ## Database Tables
 
-`products`, `inventory`, `recipes`, `recipe_ingredients`, `consumption_log`, `jobs`, `product_aliases`, `user_profiles`, `user_vitals_history`, `user_goals_history`, `spice_rack`, `recipe_spices`
+`products`, `inventory`, `recipes`, `recipe_ingredients`, `consumption_log`, `jobs`, `product_aliases`, `user_profiles`, `user_vitals_history`, `user_goals_history`, `spice_rack`, `recipe_spices`, `spice_aliases`
 
 Key enums: `inventory.location` = `'Pantry'|'Fridge'|'Freezer'`; `products.type` = `'raw'|'cooked'`; `jobs.status` = `'pending'|'completed'|'failed'`
