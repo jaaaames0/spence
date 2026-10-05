@@ -21,17 +21,7 @@ if ($action === 'sync_ingredients') {
         die(json_encode(['status' => 'error', 'message' => 'Invalid ingredients format']));
     }
 
-    $configuredPath = getenv('SPENCE_INGREDIENTS_PATH');
-    if ($configuredPath !== false && $configuredPath !== '') {
-        $jsonPath = spenceAbsolutePath($configuredPath, 'SPENCE_INGREDIENTS_PATH');
-    } else {
-        $jsonPath = '../../ingredients/shopping_list.json';
-        if (!file_exists($jsonPath)) {
-            // Preserve the existing production fallback until Ingredients is
-            // migrated to its own immutable runtime and state directory.
-            $jsonPath = '/srv/jaaaames.com/ingredients/shopping_list.json';
-        }
-    }
+    $jsonPath = spenceIngredientsListPath();
 
     $currentList = [];
     if (file_exists($jsonPath)) {

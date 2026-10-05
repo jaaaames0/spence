@@ -31,6 +31,18 @@ try {
         // Expected.
     }
 
+    putenv('SPENCE_INGREDIENTS_PATH=' . $credentialPath);
+    assertSameValue($credentialPath, spenceIngredientsListPath(), 'configured Ingredients list path');
+    assertSameValue(true, spenceIngredientsEnabled(), 'existing Ingredients list enables integration');
+    putenv('SPENCE_INGREDIENTS_PATH=' . $credentialPath . '.missing');
+    assertSameValue(false, spenceIngredientsEnabled(), 'missing Ingredients list disables integration');
+    putenv('SPENCE_INGREDIENTS_PATH');
+    assertSameValue(
+        '/srv/jaaaames.com/ingredients/shopping_list.json',
+        spenceIngredientsListPath(),
+        'default Ingredients list is absolute, not runtime-relative'
+    );
+
     $cookie = spenceAuthCookieOptions(12345);
     assertSameValue('/spence/', $cookie['path'], 'cookie scope');
     assertSameValue(true, $cookie['secure'], 'cookie secure flag');

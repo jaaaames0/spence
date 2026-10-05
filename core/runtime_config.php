@@ -19,6 +19,19 @@ function spenceConfiguredPath(string $environmentName, string $defaultPath): str
     return spenceAbsolutePath($path, $environmentName);
 }
 
+// Ingredients lives outside the immutable Spence runtime, so its shopping list
+// must be located by absolute path rather than relative to the script.
+function spenceIngredientsListPath(): string {
+    return spenceConfiguredPath(
+        'SPENCE_INGREDIENTS_PATH',
+        '/srv/jaaaames.com/ingredients/shopping_list.json'
+    );
+}
+
+function spenceIngredientsEnabled(): bool {
+    return is_file(spenceIngredientsListPath());
+}
+
 function spenceReadCredential(
     string $pathEnvironmentName,
     string $defaultPath,

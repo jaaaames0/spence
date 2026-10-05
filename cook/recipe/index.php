@@ -10,7 +10,7 @@ $recipe_id = $_GET['id'] ?? null;
 if (!$recipe_id) { header("Location: ../index.php"); exit; }
 
 // --- Integration Check ---
-$ingredientsEnabled = file_exists('../../../ingredients/index.html');
+$ingredientsEnabled = spenceIngredientsEnabled();
 
 $stmt = $db->prepare("
     SELECT r.*, 

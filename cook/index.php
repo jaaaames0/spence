@@ -7,7 +7,7 @@ require_once '../core/db_helper.php';
 $db = get_db_connection();
 
 // --- Integration Check ---
-$ingredientsEnabled = file_exists('../../ingredients/index.html');
+$ingredientsEnabled = spenceIngredientsEnabled();
 
 // --- Data Fetching ---
 $query = "
