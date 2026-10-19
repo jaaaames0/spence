@@ -51,6 +51,25 @@ LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu php tests/test_db_helper.php
 LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu php tests/test_energy_calibration.php
 ```
 
-Deployments must use a checkpoint, a timed rollback, SQLite integrity checks,
-PHP lint, nginx validation, HTTP/authentication tests, and real database/upload
-workflows before the old runtime is retired.
+## Deploying
+
+Code-only changes are fast-lane deploys (`/home/james/AGENTS.md`, host handbook
+§9.1). Commit, then:
+
+```bash
+fastdeploy spence             # tests, build, PHP lint, SQLite snapshot, switch, reload
+fastdeploy spence --status
+fastdeploy spence --rollback  # back to the previous release
+```
+
+`/srv/jaaaames.com/spence` links to `/usr/local/lib/spence/current`, which links to
+the release. `fastdeploy` exports an allowlist of tracked runtime paths (see
+`/home/james/src/fastdeploy/projects/spence.conf`) into a new root-owned release,
+recreates the state symlinks, takes a consistent SQLite snapshot under
+`/data/security-backups/fastdeploy/spence`, switches `current`, reloads
+`php8.3-fpm`, and switches back if `https://jaaaames.com/spence/` stops
+answering. A new top-level runtime directory must be added to that allowlist.
+
+Use the full procedure (checkpoint, timed rollback, operator acceptance) for
+changes to the PHP-FPM pool, AppArmor hat, credentials, nginx, or a schema
+change the previous release cannot read.
