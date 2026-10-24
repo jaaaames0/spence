@@ -148,13 +148,14 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
                 $db->prepare("INSERT INTO inventory (product_id, current_qty, unit, price_paid, location, expiry_date, expiry_source) VALUES (?, ?, ?, ?, ?, ?, ?)")
                    ->execute([$productId, $incomingAmount, $canonicalUnit, $item['price'], $item['location'], $expiry['date'], $expiry['source']]);
             }
+            $purchaseId = recordPurchase($db, $productId, $incomingAmount, $canonicalUnit, (float)$item['price'], 'receipt', $jobId);
 
             $db->commit();
             $ingestedIds[] = $productId;
             $result = ['product' => $cleanName, 'status' => 'ingested', 'product_id' => $productId];
             if ($spiceCandidate) {
                 // Enough to reverse this line exactly if the user decides it belongs in the spice rack
-                $result += ['spice_candidate' => true, 'new_product' => $isNewProduct, 'location' => $item['location'], 'amount' => $incomingAmount, 'price' => (float)$item['price']];
+                $result += ['spice_candidate' => true, 'new_product' => $isNewProduct, 'location' => $item['location'], 'amount' => $incomingAmount, 'price' => (float)$item['price'], 'purchase_id' => $purchaseId];
             }
             $itemResults[] = $result;
         } catch (Exception $e) {
@@ -214,6 +215,8 @@ function moveReceiptItemToSpiceRack(PDO $db, int $jobId, int $index, ?int $spice
             $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$qty, $price, $row['id']]);
             normalizeInventoryBalance($db, (int)$row['id']);
         }
+        // Rack spices aren't costed stock, so the line comes back out of spend too
+        if (!empty($entry['purchase_id'])) $db->prepare("DELETE FROM purchase_log WHERE id = ?")->execute([(int)$entry['purchase_id']]);
 
         // A product this scan created only for this line is noise in the product master once moved
         $productDeleted = false;

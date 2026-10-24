@@ -68,6 +68,8 @@ $avgs = [
     'cost' => $totals['cost'] / $count
 ];
 
+$waste = getWasteSummary($db, $start_date, $end_date);
+
 // Use the plan effective at the end of the viewed period, never today's plan for old weeks.
 $goals = getUserGoals($db, min($end_date, $today_str));
 $goal_kj = $goals['kj']; $goal_p = $goals['p']; $goal_f = $goals['f']; $goal_c = $goals['c']; $goal_cost = $goals['cost'];
@@ -130,7 +132,7 @@ include '../core/page_head.php';
                     <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Prot</div><div class="stat-mini-value color-p" style="font-size: 1.8rem;"><?= number_format($avgs['p'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-p opacity-50">/ <?= number_format($goal_p, 1) ?> g</div></div></div>
                     <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Fat</div><div class="stat-mini-value color-f" style="font-size: 1.8rem;"><?= number_format($avgs['f'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-f opacity-50">/ <?= number_format($goal_f, 1) ?> g</div></div></div>
                     <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Carb</div><div class="stat-mini-value color-c" style="font-size: 1.8rem;"><?= number_format($avgs['c'], 1) ?><span class="fs-6 ms-1 opacity-50">g</span></div><div class="stat-mini-label color-c opacity-50">/ <?= number_format($goal_c, 1) ?> g</div></div></div>
-                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Cost</div><div class="stat-mini-value color-cost" style="font-size: 1.8rem;">$<?= number_format($avgs['cost'], 2) ?></div><div class="stat-mini-label color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div></div></div>
+                    <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">PERIOD AVG Cost</div><div class="stat-mini-value color-cost" style="font-size: 1.8rem;">$<?= number_format($avgs['cost'], 2) ?></div><div class="stat-mini-label color-cost opacity-50">/ $<?= number_format($goal_cost, 2) ?></div><div class="stat-mini-label mt-1" style="color:#ff9800;">$<?= number_format($waste['wasted'], 2) ?> wasted · <?= number_format($waste['waste_pct'], 1) ?>%</div><div class="stat-mini-label text-muted">$<?= number_format($waste['spent'], 2) ?> bought</div></div></div>
                     <div class="col-6 col-md-4"><div class="stat-mini h-100 d-flex flex-column justify-content-center"><div class="stat-mini-label uppercase">Active Days</div><div class="stat-mini-value text-white" style="font-size: 1.8rem;"><?= $active_days ?> <span class="fs-6 text-muted">/ 7</span></div></div></div>
                 </div>
             </div>

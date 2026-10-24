@@ -165,7 +165,80 @@ function get_db_connection(?string $dbPath = null): PDO {
         )');
     });
 
+    applyDatabaseMigration($db, '007_purchase_and_waste_logs', function (PDO $db): void {
+        // No product FKs: like consumption_log, history must survive product deletes and merges.
+        $db->exec('CREATE TABLE IF NOT EXISTS purchase_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER,
+            qty REAL NOT NULL,
+            unit TEXT,
+            price REAL NOT NULL DEFAULT 0,
+            source TEXT NOT NULL,
+            job_id INTEGER,
+            purchased_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )');
+        $db->exec('CREATE TABLE IF NOT EXISTS waste_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER,
+            qty REAL NOT NULL,
+            unit TEXT,
+            value REAL NOT NULL DEFAULT 0,
+            wasted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_purchase_log_purchased_at ON purchase_log(purchased_at)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_waste_log_wasted_at ON waste_log(wasted_at)');
+
+        // Backfill spend from past receipt scans; manual adds before this point were never recorded.
+        if (!$db->query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'jobs'")->fetchColumn()) return;
+        $insert = $db->prepare("INSERT INTO purchase_log (product_id, qty, unit, price, source, job_id, purchased_at) VALUES (?, ?, ?, ?, 'receipt', ?, ?)");
+        foreach ($db->query("SELECT id, created_at, result_json FROM jobs WHERE result_json LIKE '%item_results%'")->fetchAll(PDO::FETCH_ASSOC) as $job) {
+            $result = json_decode((string)$job['result_json'], true);
+            foreach ($result['item_results'] ?? [] as $index => $itemResult) {
+                $item = $result['items'][$index] ?? null;
+                if (!$item || ($itemResult['status'] ?? '') !== 'ingested' || !empty($itemResult['moved_to_spice_rack'])) continue;
+                $insert->execute([(int)$itemResult['product_id'], (float)($item['amount'] ?? 0), $item['unit'] ?? null, (float)($item['price'] ?? 0), (int)$job['id'], $job['created_at']]);
+            }
+        }
+    });
+
     return $db;
+}
+
+/** Record food bought into inventory (per item, so receipt fees and non-food lines never count). */
+function recordPurchase(PDO $db, int $productId, float $qty, string $unit, float $price, string $source, ?int $jobId = null): int {
+    $db->prepare("INSERT INTO purchase_log (product_id, qty, unit, price, source, job_id) VALUES (?, ?, ?, ?, ?, ?)")
+       ->execute([$productId, $qty, $unit, $price, $source, $jobId]);
+    return (int)$db->lastInsertId();
+}
+
+/** Record stock thrown out, valued at its remaining cost basis. */
+function recordWaste(PDO $db, int $productId, float $qty, string $unit, float $value): void {
+    if ($qty <= 0.0001 && $value <= 0.0001) return;
+    $db->prepare("INSERT INTO waste_log (product_id, qty, unit, value) VALUES (?, ?, ?, ?)")
+       ->execute([$productId, $qty, $unit, max(0, $value)]);
+}
+
+/**
+ * Consumed vs wasted value over a local-date range. Waste share is measured against food used up
+ * (consumed + wasted) rather than purchases, which land in lumps and would swing a weekly ratio.
+ */
+function getWasteSummary(PDO $db, string $startDate, string $endDate): array {
+    $tz = SPENCE_TIMEZONE_OFFSET;
+    $sum = function (string $sql) use ($db, $startDate, $endDate): float {
+        $stmt = $db->prepare($sql);
+        $stmt->execute([$startDate, $endDate]);
+        return (float)($stmt->fetchColumn() ?: 0);
+    };
+    $consumed = $sum("SELECT SUM(amount * unit_cost) FROM consumption_log WHERE DATE(consumed_at, '$tz') BETWEEN ? AND ?");
+    $wasted = $sum("SELECT SUM(value) FROM waste_log WHERE DATE(wasted_at, '$tz') BETWEEN ? AND ?");
+    $spent = $sum("SELECT SUM(price) FROM purchase_log WHERE DATE(purchased_at, '$tz') BETWEEN ? AND ?");
+    $used = $consumed + $wasted;
+    return [
+        'consumed' => $consumed,
+        'wasted' => $wasted,
+        'spent' => $spent,
+        'waste_pct' => $used > 0 ? $wasted / $used * 100 : 0.0,
+    ];
 }
 
 /** Clamp a post-deduction floating-point residue to an exact zero. */

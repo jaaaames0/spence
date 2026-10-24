@@ -30,7 +30,19 @@ if ($path === false) throw new RuntimeException('Could not create temporary data
 try {
     $seed = new PDO('sqlite:' . $path);
     $seed->exec(file_get_contents(__DIR__ . '/../database/schema.sql'));
+    // A scan from before purchase tracking existed, to be backfilled when the migration runs
+    $seed->prepare("INSERT INTO jobs (file_path, status, result_json, created_at) VALUES ('old', 'processed', ?, '2026-01-05 01:00:00')")->execute([json_encode([
+        'items' => [receiptItem('Old Milk', 'Dairy', ['price' => 2.5]), receiptItem('Old Paprika', 'Spice/Herb', ['price' => 3.0]), receiptItem('Old Kit', 'Spice/Herb', ['price' => 5.0])],
+        'item_results' => [
+            ['product' => 'Old Milk', 'status' => 'ingested', 'product_id' => 901],
+            ['product' => 'Old Paprika', 'status' => 'spice_restocked', 'spice' => 'Paprika'],
+            ['product' => 'Old Kit', 'status' => 'ingested', 'product_id' => 902, 'spice_candidate' => true, 'moved_to_spice_rack' => true],
+        ],
+    ])]);
     $db = get_db_connection($path);
+    $backfilled = $db->query("SELECT product_id, price, purchased_at FROM purchase_log")->fetchAll(PDO::FETCH_ASSOC);
+    assertSameValue([['product_id' => 901, 'price' => 2.5, 'purchased_at' => '2026-01-05 01:00:00']], $backfilled, 'Backfill did not take exactly the stocked lines of the old scan');
+    $db->exec("DELETE FROM purchase_log");
     $today = new DateTimeImmutable('today');
     $day = fn(int $offset) => $today->modify("{$offset} days")->format('Y-m-d');
 
@@ -52,12 +64,14 @@ try {
     assertSameValue(true, $result['item_results'][1]['spice_candidate'] ?? false, 'Meal kit was not flagged for review');
     assertSameValue('Other', $db->query("SELECT category FROM products WHERE name = 'Tikka Masala Meal Kit'")->fetchColumn(), 'Flagged item kept the non-product Spice/Herb category');
     assertSameValue(1.0, (float)$db->query("SELECT i.current_qty FROM inventory i JOIN products p ON p.id = i.product_id WHERE p.name = 'Tikka Masala Meal Kit'")->fetchColumn(), 'Flagged item was not stocked');
+    assertSameValue(10.0, (float)$db->query("SELECT SUM(price) FROM purchase_log WHERE job_id = $jobId")->fetchColumn(), 'Stocked lines were not recorded as purchases (rack spices excluded)');
 
     // Confirming a flagged item as a new spice reverses its stock line and drops the throwaway product
     $moved = moveReceiptItemToSpiceRack($db, $jobId, 2);
     assertSameValue('Garam Masala', $moved['spice'], 'Confirmed spice was not added to the rack');
     assertSameValue(true, $moved['product_deleted'], 'Throwaway product created for the spice was kept');
     assertSameValue(0, (int)$db->query("SELECT COUNT(*) FROM products WHERE name = 'Garam Masala'")->fetchColumn(), 'Throwaway product still exists');
+    assertSameValue(6.0, (float)$db->query("SELECT SUM(price) FROM purchase_log WHERE job_id = $jobId")->fetchColumn(), 'Spice moved to the rack still counted as spend');
     assertSameValue('spice_restocked', ingestAsJob($db, [receiptItem('Garam Masala', 'Spice/Herb')])[1]['item_results'][0]['status'], 'Confirmed spice did not route on the next scan');
 
     // Confirming as an existing spice remembers the receipt name as an alias
@@ -82,6 +96,16 @@ try {
     assertSameValue($day(4), $row['expiry_date'], 'Restocked bananas inherited the old expiry');
     assertSameValue(6.0, (float)$row['current_qty'], 'Restocked quantity is wrong');
     assertSameValue(4.0, (float)$row['price_paid'], 'Restocked cost basis carried old cost');
+
+    // ── Wastage summary ─────────────────────────────────────────────────────
+    $db->exec("DELETE FROM purchase_log");
+    $db->exec("INSERT INTO purchase_log (product_id, qty, price, source) VALUES (1, 1, 20.0, 'manual')");
+    $db->exec("INSERT INTO consumption_log (product_id, amount, unit_cost) VALUES (1, 2, 4.5)");
+    recordWaste($db, 1, 0.5, 'kg', 3.0);
+    recordWaste($db, 1, 0, 'kg', 0);
+    $summary = getWasteSummary($db, $day(0), $day(0));
+    assertSameValue(['consumed' => 9.0, 'wasted' => 3.0, 'spent' => 20.0, 'waste_pct' => 25.0], $summary, 'Waste summary is wrong');
+    assertSameValue(1, (int)$db->query("SELECT COUNT(*) FROM waste_log")->fetchColumn(), 'Zero-value waste was recorded');
 
     echo "Receipt ingest tests passed\n";
 } finally {

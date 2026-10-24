@@ -20,7 +20,7 @@ try {
         $expiryDate = trim($_POST['expiry_date'] ?? '') ?: null;
 
         // Fetch current values to check for qty-only changes
-        $stmt = $db->prepare("SELECT current_qty, price_paid FROM inventory WHERE id = ?");
+        $stmt = $db->prepare("SELECT product_id, current_qty, unit, price_paid FROM inventory WHERE id = ?");
         $stmt->execute([$id]);
         $current = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -33,6 +33,24 @@ try {
 
         $stmt = $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, location = ?, expiry_date = ?, expiry_source = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
         $stmt->execute([$qty, $price, $location, $expiryDate, $expiryDate ? 'manual' : null, $id]);
+
+        // Trimming quantity by hand is almost always throwing some out. Raising it is a correction, not a purchase.
+        if ($current && $qty < (float)$current['current_qty'] - 0.0001) {
+            $removed = (float)$current['current_qty'] - $qty;
+            $unitCost = (float)$current['price_paid'] / ((float)$current['current_qty'] ?: 1);
+            recordWaste($db, (int)$current['product_id'], $removed, $current['unit'], $removed * $unitCost);
+        }
+        echo json_encode(['status' => 'success']);
+
+    } elseif ($action === 'waste') {
+        $db->beginTransaction();
+        $stmt = $db->prepare("SELECT product_id, current_qty, unit, price_paid FROM inventory WHERE id = ?");
+        $stmt->execute([$id]);
+        if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            recordWaste($db, (int)$row['product_id'], (float)$row['current_qty'], $row['unit'], (float)$row['price_paid']);
+            $db->prepare("DELETE FROM inventory WHERE id = ?")->execute([$id]);
+        }
+        $db->commit();
         echo json_encode(['status' => 'success']);
 
     } elseif ($action === 'delete') {
@@ -76,6 +94,7 @@ try {
 
         $stmt = $db->prepare("INSERT INTO inventory (product_id, current_qty, price_paid, unit, location, expiry_date, expiry_source) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([$product_id, $qty, $price, $base_unit, $location, $expiryDate, $expiryDate ? 'manual' : null]);
+        recordPurchase($db, $product_id, $qty, $base_unit, $price, 'manual');
         echo json_encode(['status' => 'success']);
 
     } elseif ($action === 'check_job') {

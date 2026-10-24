@@ -44,6 +44,7 @@ $daily_avg     = $spend_30d / 30;
 $days_in_month = (int)date('t');
 $monthly_proj  = number_format($daily_avg * $days_in_month, 2);
 $daily_avg_fmt = number_format($daily_avg, 2);
+$waste_30d     = getWasteSummary($db, date('Y-m-d', strtotime('-29 days')), $today);
 
 // ── 7-day kJ trend ────────────────────────────────────────────────────────────
 $stmt = $db->prepare("
@@ -261,6 +262,7 @@ include 'core/page_head.php';
                 <div class="dash-label">Month Projection</div>
                 <div class="dash-value" style="color:#4caf50;"><span style="font-size:1.1rem;">$</span><?= $monthly_proj ?></div>
                 <div class="dash-sub">$<?= $daily_avg_fmt ?>/day avg &middot; <?= $days_in_month ?>-day month</div>
+                <div class="dash-sub" style="margin-top:2px;"><span style="color:#ff9800;">$<?= number_format($waste_30d['wasted'], 2) ?> wasted &middot; <?= number_format($waste_30d['waste_pct'], 1) ?>%</span> &middot; $<?= number_format($waste_30d['spent'], 2) ?> bought <span style="color:#444;">(30d)</span></div>
             </div>
         </div>
 

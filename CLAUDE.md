@@ -59,6 +59,8 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 
 **Receipt expiry merging**: When a receipt restocks an existing inventory row, a dated new purchase replaces the row's expiry (restocks happen when stock is low; rotation makes the new date correct quickly). Undated purchases leave an in-stock date alone (`mergeInventoryExpiry()` in `receipt_ingest.php`).
 
+**Spend & wastage** (`purchase_log`, `waste_log`): Every receipt line and manual add is logged per item (rack spices excluded; moving a line to the rack removes it). The Stock "wasted" button (bi-recycle) logs the row's remaining `price_paid` before deleting; the trash button is for corrections and logs nothing. Hand-edits that lower qty log the removed share as waste; raising qty never adds spend. `getWasteSummary()` reports waste % against consumed + wasted (not purchases, which are lumpy) — shown on the weekly cost card and dashboard projection card, deliberately not on the daily log.
+
 **Energy calibration** (`core/energy_calibration.php`): Maintenance = average intake − weight-trend slope × `ENERGY_KJ_PER_KG` over the current phase, after a 14-day transition when Forge supplies the cycle. Confidence is "high" when the estimate's standard error is within `ENERGY_HIGH_CONFIDENCE_KJ` (plus 28+ days, 6+ weigh-ins, 80% coverage). The prior-phase "last stable" estimate is anchored to the current phase start (not today), and is never used across a bulk↔cut flip; targets use the formula instead.
 
 **Shared UI helpers** (`core/spence.js`, loaded in `page_head.php`): `data-autofocus` focuses a field when its modal opens; `attachProductSearch()` is the type-to-search product picker (name-only, empty until typing, ↑/↓/Enter). Use it instead of `<datalist>`/`<select>` for product lists.
@@ -67,6 +69,6 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 
 ## Database Tables
 
-`products`, `inventory`, `recipes`, `recipe_ingredients`, `consumption_log`, `jobs`, `product_aliases`, `user_profiles`, `user_vitals_history`, `user_goals_history`, `spice_rack`, `recipe_spices`, `spice_aliases`
+`products`, `inventory`, `recipes`, `recipe_ingredients`, `consumption_log`, `jobs`, `product_aliases`, `user_profiles`, `user_vitals_history`, `user_goals_history`, `spice_rack`, `recipe_spices`, `spice_aliases`, `purchase_log`, `waste_log`
 
 Key enums: `inventory.location` = `'Pantry'|'Fridge'|'Freezer'`; `products.type` = `'raw'|'cooked'`; `jobs.status` = `'pending'|'completed'|'failed'`

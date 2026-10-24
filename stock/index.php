@@ -150,7 +150,8 @@ include '../core/page_head.php';
                         <td class="text-end">
                             <div class="view-mode">
                                 <button class="btn-icon" onclick="editRow(<?= $item['id'] ?>)"><i class="bi bi-pencil"></i></button>
-                                <button class="btn-icon" onclick="deleteRow(<?= $item['id'] ?>)"><i class="bi bi-trash"></i></button>
+                                <button class="btn-icon text-warning" onclick="removeRow(<?= $item['id'] ?>, 'waste')" title="Wasted — counts toward wastage"><i class="bi bi-recycle"></i></button>
+                                <button class="btn-icon" onclick="removeRow(<?= $item['id'] ?>, 'delete')" title="Delete — correction, not wastage"><i class="bi bi-trash"></i></button>
                             </div>
                             <div class="edit-mode">
                                 <button class="btn-icon text-success" onclick="saveRow(<?= $item['id'] ?>)"><i class="bi bi-check-lg"></i></button>
@@ -567,7 +568,18 @@ include '../core/page_head.php';
             data.append('expiry_date', row.querySelector('.edit-expiry').value);
             fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status==='success') location.reload(); });
         }
-        function deleteRow(id) { fetch('../core/api.php', { method: 'POST', body: new URLSearchParams({action: 'delete', id: id}) }).then(r => r.json()).then(res => { if(res.status==='success') document.getElementById('row-'+id).remove(); }); }
+        // action 'waste' logs the row's remaining value as wastage; 'delete' just removes it (corrections)
+        function removeRow(id, action) {
+            fetch('../core/api.php', { method: 'POST', body: new URLSearchParams({action, id}) }).then(r => r.json()).then(res => {
+                if (res.status !== 'success') return;
+                document.getElementById('row-'+id).remove();
+                document.getElementById('mob-detail-'+id)?.remove();
+                // Deleting the last search match would leave an empty table — reset the search instead.
+                const search = document.getElementById('tableSearch');
+                const anyVisible = [...document.querySelectorAll('tbody tr[id^="row-"]')].some(r => r.style.display !== 'none');
+                if (search.value && !anyVisible) clearSearchField('tableSearch');
+            });
+        }
         
         const STORAGE_KEY = 'spence_stock_columns';
         function updateColVisibility(colClass, isVisible) {
