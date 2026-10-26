@@ -78,7 +78,7 @@ function mergeInventoryExpiry(array $existing, array $incoming): array {
 
 function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
     $maxIdBefore = (int)($db->query("SELECT MAX(id) FROM products")->fetchColumn() ?: 0);
-    $ingestedIds = [];
+    $newProductIds = [];
     $itemResults = [];
 
     foreach ($items as $item) {
@@ -102,6 +102,12 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
             $stmt = $db->prepare("SELECT id, merges_into, is_dropped FROM products WHERE LOWER(name) = LOWER(?) LIMIT 1");
             $stmt->execute([$cleanName]);
             $product = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$product) {
+                // Names a product had before a rename or merge
+                $stmt = $db->prepare("SELECT p.id, p.merges_into, p.is_dropped FROM product_aliases a JOIN products p ON p.id = a.canonical_product_id WHERE LOWER(a.raw_name) = LOWER(?) LIMIT 1");
+                $stmt->execute([$cleanName]);
+                $product = $stmt->fetch(PDO::FETCH_ASSOC);
+            }
             if ($product && $product['is_dropped']) {
                 $db->commit();
                 $itemResults[] = ['product' => $cleanName, 'status' => 'skipped_dropped'];
@@ -114,7 +120,7 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
                    ->execute([$cleanName, $item['category'], $item['unit'], $item['kj_per_100'], $item['protein_per_100'], $item['fat_per_100'], $item['carbs_per_100'], $item['weight_per_ea']]);
                 $productId = (int)$db->lastInsertId();
             } else {
-                $productId = (int)($product['merges_into'] ?: $product['id']);
+                $productId = $product['merges_into'] ? resolveCanonicalProductId($db, (int)$product['merges_into']) : (int)$product['id'];
             }
 
             $stmt = $db->prepare("SELECT base_unit, weight_per_ea FROM products WHERE id = ?");
@@ -151,7 +157,8 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
             $purchaseId = recordPurchase($db, $productId, $incomingAmount, $canonicalUnit, (float)$item['price'], 'receipt', $jobId);
 
             $db->commit();
-            $ingestedIds[] = $productId;
+            // Restocking a known product already went through review; only new ones are checked for duplicates
+            if ($isNewProduct) $newProductIds[] = $productId;
             $result = ['product' => $cleanName, 'status' => 'ingested', 'product_id' => $productId];
             if ($spiceCandidate) {
                 // Enough to reverse this line exactly if the user decides it belongs in the spice rack
@@ -165,7 +172,7 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
     }
 
     $potentialMerges = [];
-    foreach (array_unique($ingestedIds) as $productId) {
+    foreach (array_unique($newProductIds) as $productId) {
         foreach (findPotentialMatches($db, $productId) as $match) {
             $other = ($match['p1']['id'] == $productId) ? $match['p2'] : $match['p1'];
             if ((int)$other['id'] <= $maxIdBefore) {

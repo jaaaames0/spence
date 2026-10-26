@@ -49,7 +49,9 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 
 **Cost basis tracking**: `inventory.price_paid` is total paid; `products.last_unit_cost` is averaged. `consumption_log` captures `unit_cost` at log time for historical accuracy. Smart edits to qty-only preserve unit cost.
 
-**Deduplication flow**: New receipt items go through `matching.php` (Jaccard + category locking). Matches are flagged for user confirmation. Confirmed merges set `products.merges_into` FK and populate `product_aliases` (raw_name → canonical_product_id) for future scans.
+**Deduplication flow**: Only newly created receipt products go through `matching.php` (Levenshtein + Jaccard with category locking; restocks of known products are not re-checked). Matches are flagged for user confirmation. Confirmed merges set `products.merges_into` (always pointing at the surviving product, never chained) and populate `product_aliases` (raw_name → canonical_product_id). Ingest resolves names via `products.name` then `product_aliases`, so renamed products keep matching their old receipt names.
+
+**Product naming**: Type first, then a comma and brand/descriptors (`Cheese Slices, Extra Tasty`, `Tim Tam, Arnotts Original`), no brackets, no store brands or pack sizes. The receipt prompt in `receipt_api.php` asks for this format.
 
 ## Key Additional Systems
 

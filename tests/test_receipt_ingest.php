@@ -97,8 +97,28 @@ try {
     assertSameValue(6.0, (float)$row['current_qty'], 'Restocked quantity is wrong');
     assertSameValue(4.0, (float)$row['price_paid'], 'Restocked cost basis carried old cost');
 
+    // ── Merges and renames keep old receipt names resolving ─────────────────
+    $productId = fn(string $name) => (int)$db->query("SELECT id FROM products WHERE name = " . $db->quote($name))->fetchColumn();
+    ingestAsJob($db, [receiptItem('Tuna Meal A', 'Proteins'), receiptItem('Tuna Meal B', 'Proteins'), receiptItem('Tuna Meal C', 'Proteins')]);
+    [$a, $b, $c] = [$productId('Tuna Meal A'), $productId('Tuna Meal B'), $productId('Tuna Meal C')];
+    recordWaste($db, $a, 1, 'ea', 1.0);
+    executeProductMerge($db, $a, $b);
+    executeProductMerge($db, $b, $c);
+    assertSameValue($c, (int)$db->query("SELECT merges_into FROM products WHERE id = $a")->fetchColumn(), 'Merge left a chain behind');
+    assertSameValue(0, (int)$db->query("SELECT COUNT(*) FROM purchase_log WHERE product_id IN ($a, $b)")->fetchColumn(), 'Merge left purchases on the absorbed product');
+    assertSameValue(0, (int)$db->query("SELECT COUNT(*) FROM waste_log WHERE product_id IN ($a, $b)")->fetchColumn(), 'Merge left waste on the absorbed product');
+    $db->exec("UPDATE products SET merges_into = $b WHERE id = $a"); // a chain made before merges flattened them
+    ingestAsJob($db, [receiptItem('Tuna Meal A', 'Proteins')]);
+    assertSameValue(4.0, (float)$db->query("SELECT SUM(current_qty) FROM inventory WHERE product_id = $c")->fetchColumn(), 'Old name did not resolve through the merge chain');
+    $db->prepare("UPDATE products SET name = 'Tuna Meal, Yellowfin' WHERE id = ?")->execute([$c]);
+    $db->prepare("INSERT INTO product_aliases (raw_name, canonical_product_id) VALUES ('Tuna Meal C', ?)")->execute([$c]);
+    ingestAsJob($db, [receiptItem('Tuna Meal C', 'Proteins')]);
+    assertSameValue(0, $productId('Tuna Meal C'), 'Renamed product was duplicated under its old name');
+    assertSameValue(5.0, (float)$db->query("SELECT SUM(current_qty) FROM inventory WHERE product_id = $c")->fetchColumn(), 'Old name did not resolve through the alias');
+
     // ── Wastage summary ─────────────────────────────────────────────────────
     $db->exec("DELETE FROM purchase_log");
+    $db->exec("DELETE FROM waste_log");
     $db->exec("INSERT INTO purchase_log (product_id, qty, price, source) VALUES (1, 1, 20.0, 'manual')");
     $db->exec("INSERT INTO consumption_log (product_id, amount, unit_cost) VALUES (1, 2, 4.5)");
     recordWaste($db, 1, 0.5, 'kg', 3.0);

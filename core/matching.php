@@ -1,42 +1,9 @@
 <?php
 /**
  * SPENCE | Matching & Deduplication Shared Logic
- * Phase 4.9.1: Concept Grouping & Hyper-Generic Expansion
  */
 
 function findPotentialMatches($db, $targetProductId = null) {
-    // Canonical Synonym Map
-    $synMap = [
-        'mince' => ['ground', 'minced', 'burger', 'hamburger'],
-        'beef' => ['steak', 'cow', 'roast', 'bovine'],
-        'pork' => ['pig', 'swine'],
-        'prawn' => ['shrimp'],
-        'calamari' => ['squid'],
-        'chicken' => ['poultry', 'thigh', 'breast', 'drumstick', 'fillet'],
-        'sausage' => ['snag', 'banger'],
-        'bacon' => ['rasher', 'strip'],
-        'yogurt' => ['yoghurt'],
-        'milk' => ['dairy', 'cream', 'whole', 'skim', 'skimmed'],
-        'cheddar' => ['tasty', 'cheese'],
-        'capsicum' => ['pepper', 'bell'],
-        'zucchini' => ['courgette'],
-        'eggplant' => ['aubergine', 'brinjal'],
-        'onion' => ['shallot', 'scallion'],
-        'coriander' => ['cilantro'],
-        'beetroot' => ['beet'],
-        'rocket' => ['arugula', 'roquette'],
-        'pea' => ['mangetout'],
-        'broccoli' => ['broccolini'],
-        'chilli' => ['chili', 'chile'],
-        'lettuce' => ['cos', 'romaine'],
-        'pumpkin' => ['butternut', 'squash'],
-        'potato' => ['potatoes', 'spud', 'kumara'],
-        'tomato' => ['tomatoes', 'truss', 'cherry', 'roma'],
-        'sugar' => ['caster', 'icing'],
-        'flour' => ['plain', 'raising'],
-        'stock' => ['broth', 'bouillon'],
-    ];
-
     $matches = [];
 
     if ($targetProductId) {
@@ -50,7 +17,7 @@ function findPotentialMatches($db, $targetProductId = null) {
         $others = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         foreach ($others as $p2) {
-            $m = checkMatch($subject, $p2, $synMap);
+            $m = checkMatch($subject, $p2);
             if ($m) $matches[] = $m;
         }
     } else {
@@ -59,7 +26,7 @@ function findPotentialMatches($db, $targetProductId = null) {
         
         for ($i = 0; $i < count($products); $i++) {
             for ($j = $i + 1; $j < count($products); $j++) {
-                $m = checkMatch($products[$i], $products[$j], $synMap);
+                $m = checkMatch($products[$i], $products[$j]);
                 if ($m) $matches[] = $m;
             }
         }
@@ -79,7 +46,7 @@ function findPotentialMatches($db, $targetProductId = null) {
     return $matches;
 }
 
-function checkMatch($p1, $p2, $synMap) {
+function checkMatch($p1, $p2) {
     if ($p1['category'] !== $p2['category']) return null;
 
     $n1 = strtolower($p1['name']);
@@ -109,12 +76,6 @@ function checkMatch($p1, $p2, $synMap) {
         'canned', 'tinned', 'jarred', 'bottled', 'australian', 'local', 'imported', 'with', 'and'
     ];
 
-    // HYPER-GENERIC WORDS (Zero-Value Signal)
-    $hyperGenerics = [
-        'chicken', 'beef', 'pork', 'meat', 'fruit', 'vegetable', 'veg', 'milk', 'yogurt', 'yoghurt', 
-        'bread', 'oil', 'water', 'juice', 'tomato', 'potato', 'onion', 'egg', 'eggs', 'sauce', 'pasta'
-    ];
-    
     $tokenize = function($name) use ($stopWords) {
         return array_values(array_filter(explode(' ', preg_replace('/[^a-z0-9 ]/', '', $name)), function($w) use ($stopWords) {
             return strlen($w) > 2 && !in_array($w, $stopWords);
@@ -132,44 +93,12 @@ function checkMatch($p1, $p2, $synMap) {
     $union = array_unique(array_merge($sort1, $sort2));
     $jaccard = count($intersection) / count($union);
 
-    if ($jaccard >= 0.60) return ['p1' => $p1, 'p2' => $p2, 'distance' => "Jaccard: " . round($jaccard, 2)];
+    // One shared word ("Butter Chicken" vs "Shredded Chicken") is not a match unless a name has only that word
+    $sharedNeeded = min(2, count($sort1), count($sort2));
+    if ($jaccard >= 0.60 && count($intersection) >= $sharedNeeded) return ['p1' => $p1, 'p2' => $p2, 'distance' => "Jaccard: " . round($jaccard, 2)];
 
-    // 3. CONCEPT OVERLAP ENGINE (The Group-Aware Matcher)
-    // Map tokens to their "Group Roots"
-    $getGroups = function($tokens) use ($synMap) {
-        $groups = [];
-        foreach ($tokens as $token) {
-            $found = false;
-            foreach ($synMap as $root => $syns) {
-                if ($token === $root || in_array($token, $syns)) {
-                    $groups[] = $root;
-                    $found = true;
-                    break;
-                }
-            }
-            if (!$found) $groups[] = $token; // Literal token is its own group
-        }
-        return array_unique($groups);
-    };
-
-    $groups1 = $getGroups($clean1);
-    $groups2 = $getGroups($clean2);
-    $sharedGroups = array_intersect($groups1, $groups2);
-
-    // Rule: Must share at least 2 unique groups
-    if (count($sharedGroups) >= 2) {
-        // Filter out shared groups that are hyper-generic
-        $meaningfulShared = array_filter($sharedGroups, function($g) use ($hyperGenerics) {
-            return !in_array($g, $hyperGenerics);
-        });
-
-        // Condition: If we share 2+ groups total, and at least one is NOT hyper-generic,
-        // it's a high-signal match (e.g., "Free Range" + "Eggs").
-        if (count($sharedGroups) >= 2 && count($meaningfulShared) >= 1) {
-            return ['p1' => $p1, 'p2' => $p2, 'distance' => 'Semantic'];
-        }
-    }
-
+    // Word-overlap ("concept") matching was dropped: with type-first names it paired every
+    // ice cream, pie and protein bar with each other
     return null;
 }
 
@@ -236,13 +165,28 @@ function findSubstitutes($db, $productName, $category = null) {
     return array_slice($subs, 0, 5); // Return top 5
 }
 
+/**
+ * Follow merges_into to the surviving product (merges can chain when a product
+ * that already absorbed others is itself merged).
+ */
+function resolveCanonicalProductId($db, $id) {
+    $stmt = $db->prepare("SELECT merges_into FROM products WHERE id = ?");
+    for ($seen = []; $id && !isset($seen[$id]); ) {
+        $seen[$id] = true;
+        $stmt->execute([$id]);
+        $next = $stmt->fetchColumn();
+        if (!$next) break;
+        $id = (int)$next;
+    }
+    return (int)$id;
+}
+
 function executeProductMerge($db, $source_id, $target_id, $blend_macros = false) {
+    // Joins a caller's transaction (bulk cleanup) rather than nesting one
+    $ownsTransaction = !$db->inTransaction();
     try {
-        $db->beginTransaction();
-        $stmt = $db->prepare("SELECT merges_into FROM products WHERE id = ?");
-        $stmt->execute([$target_id]);
-        $check = $stmt->fetchColumn();
-        if ($check) $target_id = $check;
+        if ($ownsTransaction) $db->beginTransaction();
+        $target_id = resolveCanonicalProductId($db, $target_id);
         $stmt = $db->prepare("SELECT * FROM products WHERE id = ?");
         $stmt->execute([$source_id]);
         $source = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -279,14 +223,20 @@ function executeProductMerge($db, $source_id, $target_id, $blend_macros = false)
             }
             $db->prepare("UPDATE recipe_ingredients SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
             $db->prepare("UPDATE consumption_log SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
+            $db->prepare("UPDATE purchase_log SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
+            $db->prepare("UPDATE waste_log SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
+            $db->prepare("UPDATE product_aliases SET canonical_product_id = ? WHERE canonical_product_id = ?")->execute([$target_id, $source_id]);
+            // Products the source had already absorbed now point straight at the target
+            $db->prepare("UPDATE products SET merges_into = ? WHERE merges_into = ?")->execute([$target_id, $source_id]);
             $db->prepare("INSERT OR IGNORE INTO product_aliases (raw_name, canonical_product_id) VALUES (?, ?)")
                ->execute([$source['name'], $target_id]);
             $db->prepare("UPDATE products SET merges_into = ? WHERE id = ?")->execute([$target_id, $source_id]);
         }
-        $db->commit();
+        if ($ownsTransaction) $db->commit();
         return ['status' => 'success'];
     } catch (Exception $e) {
-        if ($db->inTransaction()) $db->rollBack();
+        if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
+        if (!$ownsTransaction) throw $e;
         return ['status' => 'error', 'message' => $e->getMessage()];
     }
 }
