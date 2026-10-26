@@ -70,12 +70,6 @@ include '../core/page_head.php';
                             <button class="btn btn-primary-spence w-100 fw-bold py-2" onclick="forceMerge()">MERGE PRODUCTS</button>
                         </div>
                     </div>
-                    <div class="mt-3 pt-3 border-top border-secondary">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="blendMacros">
-                            <label class="form-check-label small text-muted fw-bold uppercase" for="blendMacros">Blend Macros on Merge <span class="text-secondary fw-normal" style="text-transform: none;">(default: preserve canonical macros)</span></label>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="card overflow-hidden">
@@ -88,7 +82,7 @@ include '../core/page_head.php';
                                 <tr class="text-muted small">
                                     <th>POTENTIAL MATCHES</th>
                                     <th class="text-center" style="width: 120px;">ENGINE</th>
-                                    <th class="text-end" style="width: 340px;">ACTIONS</th>
+                                    <th class="text-end" style="width: 160px;">ACTIONS</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -99,15 +93,14 @@ include '../core/page_head.php';
                                 <tr>
                                     <td>
                                         <div class="d-flex align-items-center gap-2">
-                                            <span class="fw-bold">"<?= htmlspecialchars($m['p1']['name']) ?>"</span>
+                                            <span class="fw-bold"><?= htmlspecialchars($m['p1']['name']) ?></span>
                                             <i class="bi bi-arrow-left-right text-muted px-1"></i>
-                                            <span class="fw-bold">"<?= htmlspecialchars($m['p2']['name']) ?>"</span>
+                                            <span class="fw-bold"><?= htmlspecialchars($m['p2']['name']) ?></span>
                                         </div>
                                     </td>
                                     <td class="text-center"><span class="badge bg-secondary opacity-50 small"><?= $m['distance'] ?></span></td>
                                     <td class="text-end">
-                                        <button class="btn btn-merge me-1" onclick="merge(<?= $m['p2']['id'] ?>, <?= $m['p1']['id'] ?>, '<?= addslashes($m['p2']['name']) ?>', '<?= addslashes($m['p1']['name']) ?>')">Merge Left</button>
-                                        <button class="btn btn-merge me-1" onclick="merge(<?= $m['p1']['id'] ?>, <?= $m['p2']['id'] ?>, '<?= addslashes($m['p1']['name']) ?>', '<?= addslashes($m['p2']['name']) ?>')">Merge Right</button>
+                                        <button class="btn btn-merge me-1" onclick="reviewMerge(<?= $m['p1']['id'] ?>, <?= $m['p2']['id'] ?>, <?= htmlspecialchars(json_encode($m['distance']), ENT_QUOTES) ?>)">Review</button>
                                         <button class="btn btn-dismiss" onclick="dismiss(<?= $m['p1']['id'] ?>, <?= $m['p2']['id'] ?>)" title="Not a match — remove from suggestions"><i class="bi bi-x-lg"></i></button>
                                     </td>
                                 </tr>
@@ -136,6 +129,26 @@ include '../core/page_head.php';
         </div>
     </div>
 
+    <div class="modal fade" id="mergeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title fw-black uppercase">Review Merge</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">The right-hand product survives with its id, unit and history; pick which name and macros it keeps. Swap sides to keep the other one.</p>
+                    <div id="mergeList"></div>
+                </div>
+                <div class="modal-footer border-0 d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary fw-bold" onclick="swapMerge()"><i class="bi bi-arrow-left-right me-1"></i>SWAP SIDES</button>
+                    <button type="button" class="btn btn-dismiss fw-bold flex-grow-1" id="mergeDismissBtn" onclick="dismissReviewed()">NOT THE SAME</button>
+                    <button type="button" class="btn btn-primary-spence fw-bold flex-grow-1" onclick="applyReviewed()">MERGE</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
     const mergeProducts = <?= json_encode(array_map(fn($p) => ['id' => (int)$p['id'], 'name' => $p['name']], $products)) ?>;
     ['Source', 'Target'].forEach(key => {
@@ -156,28 +169,50 @@ include '../core/page_head.php';
         input.addEventListener('blur', () => setTimeout(() => { list.style.display = 'none'; }, 150));
     });
 
+    const mergeModal = new bootstrap.Modal(document.getElementById('mergeModal'));
+    let reviewing = null;
+
+    async function reviewMerge(sourceId, targetId, reason = '') {
+        const data = new FormData();
+        data.append('action', 'merge_preview');
+        data.append('ids', `${sourceId},${targetId}`);
+        const res = await fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json());
+        const byId = Object.fromEntries((res.products || []).map(p => [p.id, p]));
+        if (!byId[sourceId] || !byId[targetId]) return alert('Could not load those products.');
+        reviewing = { source: byId[sourceId], target: byId[targetId], reason };
+        renderReview();
+        mergeModal.show();
+    }
+
+    function renderReview() {
+        const { source, target, reason } = reviewing;
+        reviewing.reviewer = mergeReview(document.getElementById('mergeList'),
+            [{ source_id: source.id, target_id: target.id, source, target, reason, active: true }]);
+        // Dismissing only makes sense for a suggested pair
+        document.getElementById('mergeDismissBtn').classList.toggle('d-none', !reason);
+    }
+
+    function swapMerge() {
+        [reviewing.source, reviewing.target] = [reviewing.target, reviewing.source];
+        renderReview();
+    }
+
+    async function applyReviewed() {
+        const failures = await reviewing.reviewer.apply();
+        if (failures.length) return alert(failures.join('\n'));
+        location.reload();
+    }
+
+    function dismissReviewed() {
+        dismiss(reviewing.source.id, reviewing.target.id);
+    }
+
     function forceMerge() {
         const sourceId = document.getElementById('manualSource').value;
         const targetId = document.getElementById('manualTarget').value;
         if (!sourceId || !targetId) return alert('Select both products.');
         if (sourceId === targetId) return alert('Cannot merge a product into itself.');
-        const sourceName = `${document.getElementById('manualSourceName').value} (#${sourceId})`;
-        const targetName = `${document.getElementById('manualTargetName').value} (#${targetId})`;
-        merge(sourceId, targetId, sourceName, targetName);
-    }
-    function merge(sourceId, targetId, sourceName, targetName) {
-        const blend = document.getElementById('blendMacros').checked;
-        const macroNote = blend ? 'Macros will be averaged.' : 'Canonical macros will be preserved.';
-        if (!confirm(`Merge "${sourceName}" into "${targetName}"?\n\n${macroNote}\nThis moves inventory, recipes, and logs, and creates a permanent ingest alias.`)) return;
-        const data = new FormData();
-        data.append('action', 'merge');
-        data.append('source_id', sourceId);
-        data.append('target_id', targetId);
-        data.append('blend_macros', blend ? '1' : '0');
-        fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
-            if (res.status === 'success') location.reload();
-            else alert(res.message);
-        });
+        reviewMerge(+sourceId, +targetId);
     }
     function dismiss(idA, idB) {
         const data = new FormData();

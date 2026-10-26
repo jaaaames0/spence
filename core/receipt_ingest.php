@@ -76,7 +76,101 @@ function mergeInventoryExpiry(array $existing, array $incoming): array {
     return ['date' => $existing['expiry_date'] ?: null, 'source' => $existing['expiry_source']];
 }
 
-function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
+/** A live or merged product row by current name or a name it had before a rename or merge. */
+function findProductByName(PDO $db, string $name): ?array {
+    $stmt = $db->prepare("SELECT id, name, merges_into, is_dropped FROM products WHERE LOWER(name) = LOWER(?) LIMIT 1");
+    $stmt->execute([$name]);
+    if ($product = $stmt->fetch(PDO::FETCH_ASSOC)) return $product;
+    $stmt = $db->prepare("SELECT p.id, p.name, p.merges_into, p.is_dropped FROM product_aliases a JOIN products p ON p.id = a.canonical_product_id WHERE LOWER(a.raw_name) = LOWER(?) LIMIT 1");
+    $stmt->execute([$name]);
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * Ask a model whether receipt items with no known name are products already in the catalogue.
+ * Adds match_product_id (same product: stock goes onto it) or similar_product_id (offered as a
+ * merge suggestion) to the items. $complete takes a chat request and returns the message content.
+ * Returns null when the call fails, so ingest can fall back to name-similarity suggestions.
+ */
+function matchReceiptItemsWithAi(PDO $db, array $items, callable $complete, string $model): ?array {
+    $unknown = [];
+    foreach ($items as $item) {
+        $name = trim((string)($item['product'] ?? ''));
+        if ($name === '' || ($item['category'] ?? '') === 'Spice/Herb' || findProductByName($db, $name)) continue;
+        $unknown[strtolower($name)] = $item;
+    }
+    if (!$unknown) return $items;
+
+    $catalogue = $db->query("SELECT id, name, category, base_unit FROM products
+        WHERE merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL AND type != 'cooked' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+    $known = array_column($catalogue, null, 'id');
+    $lines = array_map(fn($p) => "{$p['id']} | {$p['name']} | {$p['category']} | {$p['base_unit']}", $catalogue);
+    $receipt = [];
+    foreach (array_values($unknown) as $i => $item) {
+        $receipt[] = "{$i} | {$item['product']} | {$item['category']} | {$item['unit']} | "
+            . round((float)$item['kj_per_100']) . " kJ, P " . (float)$item['protein_per_100'] . ", F " . (float)$item['fat_per_100'] . ", C " . (float)$item['carbs_per_100'];
+    }
+
+    $prompt = "You match grocery receipt items to a household's existing product catalogue.\n\n"
+        . "For each receipt item decide:\n"
+        . "- 'same': it is the same product as one catalogue entry (same item, variant and flavour; brand may be missing from the receipt). Different wording, word order, abbreviations, store-brand prefixes and pack sizes do not make it different.\n"
+        . "- 'similar': it might be the same product but you are not sure (e.g. a variant, flavour or brand you can't confirm). Give the closest entry.\n"
+        . "- 'new': nothing in the catalogue is that product. Use product_id 0.\n"
+        . "Different flavours, cuts, fat grades or product types are never 'same' (e.g. '4 Star Beef Mince' vs '3 Star', 'Chicken Breast' vs 'Chicken Thigh', 'Salted Butter' vs 'Unsalted').\n"
+        . "Catalogue names put the product type first ('Cheese Slices, Extra Tasty'); receipt names may not.\n\n"
+        . "Catalogue (id | name | category | unit):\n" . implode("\n", $lines) . "\n\n"
+        . "Receipt items (index | name | category | unit | per 100 g):\n" . implode("\n", $receipt) . "\n\n"
+        . "Return one result per receipt item.";
+
+    $request = [
+        'model' => $model,
+        // Low effort answers in ~5 s instead of ~20 s with the same 'same' verdicts in testing
+        'reasoning_effort' => 'low',
+        'messages' => [['role' => 'user', 'content' => $prompt]],
+        'response_format' => ['type' => 'json_schema', 'json_schema' => [
+            'name' => 'catalogue_matches', 'strict' => true,
+            'schema' => ['type' => 'object', 'properties' => ['matches' => ['type' => 'array', 'items' => [
+                'type' => 'object',
+                'properties' => [
+                    'index' => ['type' => 'integer'],
+                    'verdict' => ['type' => 'string', 'enum' => ['same', 'similar', 'new']],
+                    'product_id' => ['type' => 'integer'],
+                ],
+                'required' => ['index', 'verdict', 'product_id'],
+                'additionalProperties' => false,
+            ]]], 'required' => ['matches'], 'additionalProperties' => false],
+        ]],
+    ];
+
+    try {
+        $decoded = json_decode($complete($request), true);
+    } catch (Exception $e) {
+        error_log('Spence AI product matching failed: ' . $e->getMessage());
+        return null;
+    }
+    if (!is_array($decoded['matches'] ?? null)) return null;
+
+    $names = array_keys($unknown);
+    $verdicts = [];
+    foreach ($decoded['matches'] as $m) {
+        $name = $names[(int)($m['index'] ?? -1)] ?? null;
+        $id = (int)($m['product_id'] ?? 0);
+        // Ignore ids the model invented
+        if ($name !== null && isset($known[$id]) && in_array($m['verdict'] ?? '', ['same', 'similar'], true)) $verdicts[$name] = [$m['verdict'], $id];
+    }
+    foreach ($items as &$item) {
+        [$verdict, $id] = $verdicts[strtolower(trim((string)($item['product'] ?? '')))] ?? [null, 0];
+        if ($verdict === 'same') $item['match_product_id'] = $id;
+        elseif ($verdict === 'similar') $item['similar_product_id'] = $id;
+    }
+    return $items;
+}
+
+/**
+ * $aiMatching: the items went through matchReceiptItemsWithAi(), so its verdicts replace the
+ * name-similarity suggestions for new products.
+ */
+function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null, bool $aiMatching = false): array {
     $maxIdBefore = (int)($db->query("SELECT MAX(id) FROM products")->fetchColumn() ?: 0);
     $newProductIds = [];
     $itemResults = [];
@@ -99,14 +193,17 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
                 $item['category'] = 'Other';
             }
 
-            $stmt = $db->prepare("SELECT id, merges_into, is_dropped FROM products WHERE LOWER(name) = LOWER(?) LIMIT 1");
-            $stmt->execute([$cleanName]);
-            $product = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (!$product) {
-                // Names a product had before a rename or merge
-                $stmt = $db->prepare("SELECT p.id, p.merges_into, p.is_dropped FROM product_aliases a JOIN products p ON p.id = a.canonical_product_id WHERE LOWER(a.raw_name) = LOWER(?) LIMIT 1");
-                $stmt->execute([$cleanName]);
-                $product = $stmt->fetch(PDO::FETCH_ASSOC);
+            $product = findProductByName($db, $cleanName);
+            $aiMatched = false;
+            if (!$product && !empty($item['match_product_id'])) {
+                $stmt = $db->prepare("SELECT id, name, merges_into, is_dropped FROM products WHERE id = ?");
+                $stmt->execute([(int)$item['match_product_id']]);
+                if ($product = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                    $aiMatched = true;
+                    // The next receipt with this wording matches without asking the model
+                    $db->prepare("INSERT OR IGNORE INTO product_aliases (raw_name, canonical_product_id) VALUES (?, ?)")
+                       ->execute([$cleanName, $product['merges_into'] ? resolveCanonicalProductId($db, (int)$product['merges_into']) : (int)$product['id']]);
+                }
             }
             if ($product && $product['is_dropped']) {
                 $db->commit();
@@ -123,7 +220,7 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
                 $productId = $product['merges_into'] ? resolveCanonicalProductId($db, (int)$product['merges_into']) : (int)$product['id'];
             }
 
-            $stmt = $db->prepare("SELECT base_unit, weight_per_ea FROM products WHERE id = ?");
+            $stmt = $db->prepare("SELECT name, base_unit, weight_per_ea FROM products WHERE id = ?");
             $stmt->execute([$productId]);
             $meta = $stmt->fetch(PDO::FETCH_ASSOC);
             $canonicalUnit = $meta ? $meta['base_unit'] : $item['unit'];
@@ -158,8 +255,9 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
 
             $db->commit();
             // Restocking a known product already went through review; only new ones are checked for duplicates
-            if ($isNewProduct) $newProductIds[] = $productId;
+            if ($isNewProduct) $newProductIds[$productId] = (int)($item['similar_product_id'] ?? 0);
             $result = ['product' => $cleanName, 'status' => 'ingested', 'product_id' => $productId];
+            if ($aiMatched) $result['matched_to'] = $meta['name'];
             if ($spiceCandidate) {
                 // Enough to reverse this line exactly if the user decides it belongs in the spice rack
                 $result += ['spice_candidate' => true, 'new_product' => $isNewProduct, 'location' => $item['location'], 'amount' => $incomingAmount, 'price' => (float)$item['price'], 'purchase_id' => $purchaseId];
@@ -172,18 +270,25 @@ function ingestReceiptItems(PDO $db, array $items, ?int $jobId = null): array {
     }
 
     $potentialMerges = [];
-    foreach (array_unique($newProductIds) as $productId) {
+    $addMerge = function (int $productId, int $otherId, string $reason) use ($db, &$potentialMerges) {
+        $source = productMergePreview($db, $productId);
+        $target = productMergePreview($db, $otherId);
+        if (!$source || !$target) return;
+        $potentialMerges[] = [
+            'source_id' => $productId, 'source_name' => $source['name'],
+            'target_id' => $otherId, 'target_name' => $target['name'],
+            'reason' => $reason, 'source' => $source, 'target' => $target,
+        ];
+    };
+    foreach ($newProductIds as $productId => $similarId) {
+        if ($aiMatching) {
+            // The model has already compared every new product with the catalogue
+            if ($similarId && $similarId <= $maxIdBefore) $addMerge($productId, resolveCanonicalProductId($db, $similarId), 'AI: possible match');
+            continue;
+        }
         foreach (findPotentialMatches($db, $productId) as $match) {
             $other = ($match['p1']['id'] == $productId) ? $match['p2'] : $match['p1'];
-            if ((int)$other['id'] <= $maxIdBefore) {
-                $potentialMerges[] = [
-                    'source_id' => $productId,
-                    'source_name' => ($match['p1']['id'] == $productId) ? $match['p1']['name'] : $match['p2']['name'],
-                    'target_id' => $other['id'],
-                    'target_name' => $other['name'],
-                    'reason' => $match['distance'],
-                ];
-            }
+            if ((int)$other['id'] <= $maxIdBefore) $addMerge($productId, (int)$other['id'], $match['distance']);
         }
     }
 

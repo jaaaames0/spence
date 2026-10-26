@@ -253,26 +253,21 @@ include '../core/page_head.php';
         </div>
     </div>
 
-    <!-- Proactive Merge Modal -->
+    <!-- Post-scan merge review -->
     <div class="modal fade" id="mergeModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title fw-black uppercase">Cleanup Suggestions</h5>
+                    <h5 class="modal-title fw-black uppercase">Possible Duplicates</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body p-0">
-                    <div class="p-3 bg-dark-subtle small text-muted uppercase fw-bold border-bottom border-secondary">
-                        Potential matches found (Click arrows to flip merge direction):
-                    </div>
-                    <div id="mergeList" class="list-group list-group-flush">
-                        <!-- Matches injected here -->
-                    </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">New products from this receipt that may already be in your list. Tick the ones that are the same thing and pick which name and macros to keep. Unticked pairs won't be suggested again.</p>
+                    <div id="mergeList" class="d-flex flex-column gap-3"></div>
                 </div>
                 <div class="modal-footer border-0 d-flex gap-2">
-                    <button type="button" class="btn btn-outline-secondary fw-bold flex-grow-1" data-bs-dismiss="modal">MERGE NONE</button>
-                    <button type="button" class="btn btn-primary fw-bold flex-grow-1" onclick="executeSelectedMerges()">MERGE SELECTED</button>
-                    <button type="button" class="btn btn-secondary fw-bold flex-grow-1" onclick="mergeAll()">MERGE ALL</button>
+                    <button type="button" class="btn btn-outline-secondary fw-bold flex-grow-1" data-bs-dismiss="modal">DECIDE LATER</button>
+                    <button type="button" class="btn btn-primary fw-bold flex-grow-1" id="mergeApplyBtn" onclick="applyMergeReview()">MERGE TICKED</button>
                 </div>
             </div>
         </div>
@@ -333,15 +328,14 @@ include '../core/page_head.php';
         const mergeModal = new bootstrap.Modal(document.getElementById('mergeModal'));
         const masterProducts = <?= json_encode($all_products) ?>;
         
-        let currentMatches = [];
+        let mergeReviewer = null;
 
         document.getElementById('mergeModal').addEventListener('hidden.bs.modal', function () {
             location.href = 'index.php';
         });
-        
+
         function showMergeSuggestions(matches) {
-            currentMatches = matches.map(m => ({...m, flipped: false, active: false}));
-            renderMergeList();
+            mergeReviewer = mergeReview(document.getElementById('mergeList'), matches, { sourceLabel: 'From this receipt', targetLabel: 'Already in your list' });
             mergeModal.show();
         }
 
@@ -358,85 +352,12 @@ include '../core/page_head.php';
             });
         }
 
-        function renderMergeList() {
-            const list = document.getElementById('mergeList');
-            list.innerHTML = '';
-            
-            // Build a set of IDs being "merged from" to detect conflicts
-            const mergedFromIds = new Set();
-            currentMatches.forEach(m => {
-                if (m.active) mergedFromIds.add(m.flipped ? m.target_id : m.source_id);
-            });
-
-            currentMatches.forEach((m, index) => {
-                const sourceId = m.flipped ? m.target_id : m.source_id;
-                const targetId = m.flipped ? m.source_id : m.target_id;
-                
-                // Conflict check: if the target of THIS merge is being merged AWAY in another active row
-                const isConflicted = mergedFromIds.has(targetId);
-
-                const item = document.createElement('div');
-                item.className = 'list-group-item bg-dark border-secondary p-3 text-white merge-item ' + (isConflicted ? 'merge-conflict' : '');
-                
-                const leftName = m.source_name;
-                const rightName = m.target_name;
-                const arrowIcon = m.flipped ? 'bi-arrow-left' : 'bi-arrow-right';
-                
-                item.innerHTML = `
-                    <div class="form-check d-flex align-items-center gap-3">
-                        <input class="form-check-input merge-check" type="checkbox" value="${index}" id="merge-${index}" ${m.active ? 'checked' : ''} onchange="toggleMerge(${index})" style="width: 24px; height: 24px; flex-shrink: 0;">
-                        <div class="flex-grow-1">
-                            <div class="d-flex justify-content-between align-items-center mb-1">
-                                <span class="text-muted small uppercase fw-bold" style="font-size: 0.65rem;">Merging ${m.flipped ? 'Existing' : 'New'} into ${m.flipped ? 'New' : 'Existing'}</span>
-                                <span class="badge bg-secondary opacity-50 small">${m.reason}</span>
-                            </div>
-                            <div class="d-flex align-items-center gap-3">
-                                <div class="fw-bold fs-5 flex-grow-1 text-break">"${leftName}"</div>
-                                <div class="flip-arrow text-accent px-2" onclick="flipMerge(${index})" title="Flip Direction">
-                                    <i class="bi ${arrowIcon} h4 mb-0"></i>
-                                </div>
-                                <div class="fw-bold fs-5 flex-grow-1 text-break">"${rightName}"</div>
-                            </div>
-                            ${isConflicted ? '<div class="text-danger small uppercase fw-bold mt-1">Conflict: Target is being merged elsewhere</div>' : ''}
-                        </div>
-                    </div>
-                `;
-                list.appendChild(item);
-            });
-        }
-
-        function toggleMerge(index) {
-            currentMatches[index].active = !currentMatches[index].active;
-            renderMergeList();
-        }
-
-        function flipMerge(index) {
-            currentMatches[index].flipped = !currentMatches[index].flipped;
-            renderMergeList();
-        }
-
-        function mergeAll() {
-            currentMatches.forEach(m => m.active = true);
-            renderMergeList();
-            executeSelectedMerges();
-        }
-
-        async function executeSelectedMerges() {
-            const checks = document.querySelectorAll('.merge-check:checked');
-            if (checks.length === 0) return mergeModal.hide();
-            
-            const btn = document.querySelector('#mergeModal .btn-primary');
+        async function applyMergeReview() {
+            const btn = document.getElementById('mergeApplyBtn');
             btn.disabled = true;
             btn.innerText = 'MERGING...';
-
-            for (let check of checks) {
-                const match = currentMatches[check.value];
-                const data = new FormData();
-                data.append('action', 'merge');
-                data.append('source_id', match.flipped ? match.target_id : match.source_id);
-                data.append('target_id', match.flipped ? match.source_id : match.target_id);
-                await fetch('../core/api.php', { method: 'POST', body: data });
-            }
+            const failures = await mergeReviewer.apply({ dismissUnticked: true });
+            if (failures.length) alert('Some merges failed:\n\n' + failures.join('\n'));
             location.href = 'index.php';
         }
 
@@ -481,6 +402,7 @@ include '../core/page_head.php';
                     }
 
                     let notice = res.item_count + ' items ingested.';
+                    if (res.ai_matches && res.ai_matches.length) notice += ' Matched to existing: ' + res.ai_matches.map(m => `${m.receipt} → ${m.product}`).join(', ') + '.';
                     if (res.spices_restocked && res.spices_restocked.length) notice += ' Spice rack restocked: ' + res.spices_restocked.join(', ') + '.';
                     statusAlert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + escHtml(notice);
                     // Survives the reload below so restocked spices aren't a silent change

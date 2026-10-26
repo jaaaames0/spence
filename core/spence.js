@@ -100,3 +100,100 @@ function attachProductSearch({ input, list, products, onSelect, meta = null, lim
         clear() { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); },
     };
 }
+
+/**
+ * Merge review cards: each pair's products side by side (macros, unit, use) with a choice of
+ * which name and macros survive. The target always survives with its id and unit.
+ *   container    — element the cards render into
+ *   pairs        — [{ source_id, target_id, source_name, reason, source, target }], where
+ *                  source/target are productMergePreview() rows
+ *   sourceLabel, targetLabel — column headings
+ * Returns { apply({ dismissUnticked }) } which merges ticked pairs and resolves to failure messages.
+ */
+function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel = 'Into this' } = {}) {
+    const state = pairs.map(p => ({ ...p, active: !!p.active, name: 'target', macros: 'target' }));
+    const num = n => (Math.round(n * 10) / 10).toString();
+    const unit = p => p.base_unit === 'ea' ? `each (${num(p.weight_per_ea * 1000)} g)` : `per ${p.base_unit}`;
+    const macros = p => `${Math.round(p.kj_per_100)} kJ · P ${num(p.protein_per_100)} · F ${num(p.fat_per_100)} · C ${num(p.carb_per_100)}`;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const use = p => [p.stock_qty ? `${num(p.stock_qty)} ${p.base_unit} in stock` : 'none in stock',
+        plural(p.log_count, 'log'), p.recipe_count ? plural(p.recipe_count, 'recipe') : ''].filter(Boolean).join(' · ');
+    const off = (x, y, floor) => Math.abs(x - y) > Math.max(0.15 * Math.max(x, y), floor);
+    const differ = (a, b) => off(a.kj_per_100, b.kj_per_100, 40) || ['protein_per_100', 'fat_per_100', 'carb_per_100'].some(k => off(a[k], b[k], 1));
+
+    function render() {
+        container.innerHTML = state.map((m, i) => {
+            const s = m.source, t = m.target, warn = differ(s, t) ? 'merge-differ' : '';
+            const choice = (field, value, label) => `
+                <label class="merge-choice ${m[field] === value ? 'chosen' : ''}">
+                    <input type="radio" name="${field}-${i}" data-i="${i}" data-field="${field}" value="${value}" ${m[field] === value ? 'checked' : ''}>
+                    <span>${label}</span>
+                </label>`;
+            const unitNote = s.base_unit === t.base_unit ? '' : `<div class="small mt-2" style="color:#ff9800;"><i class="bi bi-arrow-left-right me-1"></i>Different units: stock converts to ${escHtml(unit(t))}${s.base_unit === 'ea' ? ` at ${num(s.weight_per_ea * 1000)} g each` : ''}.</div>`;
+            return `
+            <div class="merge-review ${m.active ? 'active' : ''}">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <input class="form-check-input m-0" type="checkbox" id="merge-${i}" data-i="${i}" ${m.active ? 'checked' : ''} style="width:22px;height:22px;flex-shrink:0;">
+                    <label for="merge-${i}" class="fw-bold flex-grow-1">Same product</label>
+                    ${m.reason ? `<span class="badge bg-secondary opacity-75 small">${escHtml(m.reason)}</span>` : ''}
+                </div>
+                <div class="merge-grid">
+                    <div class="merge-gap"></div>
+                    <div class="merge-head">${escHtml(sourceLabel)}</div>
+                    <div class="merge-head">${escHtml(targetLabel)}</div>
+                    <div class="merge-label">Name</div>
+                    ${choice('name', 'source', escHtml(s.name))}
+                    ${choice('name', 'target', escHtml(t.name))}
+                    <div class="merge-label">Macros <span class="fw-normal">/100 g</span></div>
+                    ${choice('macros', 'source', `<span class="${warn}">${macros(s)}</span>`)}
+                    ${choice('macros', 'target', `<span class="${warn}">${macros(t)}</span>`)}
+                    <div class="merge-gap"></div>
+                    <div class="merge-span">${choice('macros', 'blend', 'Average of both')}</div>
+                    <div class="merge-label">Unit</div>
+                    <div class="merge-info">${escHtml(unit(s))}</div>
+                    <div class="merge-info">${escHtml(unit(t))}</div>
+                    <div class="merge-label">Used</div>
+                    <div class="merge-info">${escHtml(use(s))}</div>
+                    <div class="merge-info">${escHtml(use(t))}</div>
+                </div>
+                ${unitNote}
+            </div>`;
+        }).join('');
+    }
+
+    // Assigned, not added: a container reused for another pair must drop the previous handler
+    container.onchange = e => {
+        const m = state[e.target.dataset.i];
+        if (!m) return;
+        if (e.target.type === 'checkbox') m.active = e.target.checked;
+        // Choosing a name or macros means the pair is a match
+        else { m[e.target.dataset.field] = e.target.value; m.active = true; }
+        render();
+    };
+    render();
+
+    async function post(fields) {
+        const data = new FormData();
+        Object.entries(fields).forEach(([k, v]) => data.append(k, v));
+        return fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).catch(() => ({ status: 'error', message: 'Request failed' }));
+    }
+
+    async function apply({ dismissUnticked = false } = {}) {
+        const failures = [];
+        const merged = new Set();
+        for (const m of state) {
+            if (m.active) {
+                // A product only merges once; a second tick for it would point at a merged product
+                if (merged.has(m.source_id)) continue;
+                merged.add(m.source_id);
+                const res = await post({ action: 'merge', source_id: m.source_id, target_id: m.target_id, name_from: m.name, macros: m.macros });
+                if (res.status !== 'success') failures.push(`${m.source.name}: ${res.message}`);
+            } else if (dismissUnticked) {
+                await post({ action: 'dismiss_dedupe_pair', id_a: m.source_id, id_b: m.target_id });
+            }
+        }
+        return failures;
+    }
+
+    return { apply };
+}

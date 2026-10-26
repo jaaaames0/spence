@@ -181,7 +181,47 @@ function resolveCanonicalProductId($db, $id) {
     return (int)$id;
 }
 
-function executeProductMerge($db, $source_id, $target_id, $blend_macros = false) {
+/**
+ * What a person needs to judge a merge: macros, unit and how much each product is used.
+ */
+function productMergePreview(PDO $db, int $id): ?array {
+    $stmt = $db->prepare("SELECT p.id, p.name, p.category, p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100,
+            p.base_unit, p.weight_per_ea,
+            (SELECT ROUND(SUM(current_qty), 3) FROM inventory WHERE product_id = p.id AND current_qty > 0) AS stock_qty,
+            (SELECT COUNT(*) FROM consumption_log WHERE product_id = p.id) AS log_count,
+            (SELECT COUNT(DISTINCT recipe_id) FROM recipe_ingredients WHERE product_id = p.id) AS recipe_count
+        FROM products p WHERE p.id = ?");
+    $stmt->execute([$id]);
+    $p = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$p) return null;
+    foreach (['kj_per_100', 'protein_per_100', 'fat_per_100', 'carb_per_100', 'weight_per_ea', 'stock_qty'] as $k) $p[$k] = (float)$p[$k];
+    foreach (['id', 'log_count', 'recipe_count'] as $k) $p[$k] = (int)$p[$k];
+    return $p;
+}
+
+/**
+ * Quantity of a source product expressed in the target's base unit. Each-to-weight uses the
+ * source's weight per item, weight-to-each the target's; kg and L are treated as 1:1.
+ */
+function convertMergeQuantity(float $qty, string $fromUnit, array $source, array $target): float {
+    $toUnit = $target['base_unit'];
+    if ($fromUnit === $toUnit) return $qty;
+    if ($fromUnit === 'ea') {
+        if ((float)$source['weight_per_ea'] <= 0) throw new Exception("\"{$source['name']}\" has no weight per item, so it can't be converted to {$toUnit}.");
+        return $qty * (float)$source['weight_per_ea'];
+    }
+    if ($toUnit === 'ea') {
+        if ((float)$target['weight_per_ea'] <= 0) throw new Exception("\"{$target['name']}\" has no weight per item, so {$fromUnit} can't be converted to items.");
+        return $qty / (float)$target['weight_per_ea'];
+    }
+    return $qty;
+}
+
+/**
+ * Fold $source_id into $target_id. The target keeps its id, unit and history; $macros picks whose
+ * macros survive ('target', 'source' or 'blend') and $nameFrom whose name ('target' or 'source').
+ */
+function executeProductMerge($db, $source_id, $target_id, string $macros = 'target', string $nameFrom = 'target') {
     // Joins a caller's transaction (bulk cleanup) rather than nesting one
     $ownsTransaction = !$db->inTransaction();
     try {
@@ -190,35 +230,39 @@ function executeProductMerge($db, $source_id, $target_id, $blend_macros = false)
         $stmt = $db->prepare("SELECT * FROM products WHERE id = ?");
         $stmt->execute([$source_id]);
         $source = $stmt->fetch(PDO::FETCH_ASSOC);
-        $stmt = $db->prepare("SELECT * FROM products WHERE id = ?");
         $stmt->execute([$target_id]);
         $target = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($source && $target && $source_id != $target_id) {
-            if ($blend_macros) {
+            $macroFields = ['kj_per_100', 'protein_per_100', 'fat_per_100', 'carb_per_100'];
+            if ($macros === 'source' || $macros === 'blend') {
+                $values = array_map(fn($f) => $macros === 'source' ? (float)$source[$f] : ((float)$source[$f] + (float)$target[$f]) / 2, $macroFields);
                 $db->prepare("UPDATE products SET kj_per_100 = ?, protein_per_100 = ?, fat_per_100 = ?, carb_per_100 = ? WHERE id = ?")
-                   ->execute([
-                       ($source['kj_per_100'] + $target['kj_per_100']) / 2,
-                       ($source['protein_per_100'] + $target['protein_per_100']) / 2,
-                       ($source['fat_per_100'] + $target['fat_per_100']) / 2,
-                       ($source['carb_per_100'] + $target['carb_per_100']) / 2,
-                       $target_id
-                   ]);
+                   ->execute([...$values, $target_id]);
             }
-            // Default: preserve target (canonical) macros unchanged
+
             $stmt = $db->prepare("SELECT * FROM inventory WHERE product_id = ?");
             $stmt->execute([$source_id]);
-            $source_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($source_items as $item) {
-                $stmt = $db->prepare("SELECT id FROM inventory WHERE product_id = ? AND location = ? AND unit = ? LIMIT 1");
-                $stmt->execute([$target_id, $item['location'], $item['unit']]);
-                $target_bucket_id = $stmt->fetchColumn();
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+                $qty = convertMergeQuantity((float)$item['current_qty'], $item['unit'], $source, $target);
+                $bucket = $db->prepare("SELECT id FROM inventory WHERE product_id = ? AND location = ? AND unit = ? LIMIT 1");
+                $bucket->execute([$target_id, $item['location'], $target['base_unit']]);
+                $target_bucket_id = $bucket->fetchColumn();
                 if ($target_bucket_id) {
                     $db->prepare("UPDATE inventory SET current_qty = current_qty + ?, price_paid = price_paid + ? WHERE id = ?")
-                       ->execute([$item['current_qty'], $item['price_paid'], $target_bucket_id]);
+                       ->execute([$qty, $item['price_paid'], $target_bucket_id]);
                     $db->prepare("DELETE FROM inventory WHERE id = ?")->execute([$item['id']]);
                 } else {
-                    $db->prepare("UPDATE inventory SET product_id = ? WHERE id = ?")
-                       ->execute([$target_id, $item['id']]);
+                    $db->prepare("UPDATE inventory SET product_id = ?, current_qty = ?, unit = ? WHERE id = ?")
+                       ->execute([$target_id, $qty, $target['base_unit'], $item['id']]);
+                }
+            }
+            // Recipes measure in items only for products sold by the item; weights work for either
+            if ($source['base_unit'] === 'ea' && $target['base_unit'] !== 'ea') {
+                $stmt = $db->prepare("SELECT id, amount FROM recipe_ingredients WHERE product_id = ? AND unit = 'ea'");
+                $stmt->execute([$source_id]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $ri) {
+                    $db->prepare("UPDATE recipe_ingredients SET amount = ?, unit = ? WHERE id = ?")
+                       ->execute([convertMergeQuantity((float)$ri['amount'], 'ea', $source, $target), $target['base_unit'], $ri['id']]);
                 }
             }
             $db->prepare("UPDATE recipe_ingredients SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
@@ -228,9 +272,13 @@ function executeProductMerge($db, $source_id, $target_id, $blend_macros = false)
             $db->prepare("UPDATE product_aliases SET canonical_product_id = ? WHERE canonical_product_id = ?")->execute([$target_id, $source_id]);
             // Products the source had already absorbed now point straight at the target
             $db->prepare("UPDATE products SET merges_into = ? WHERE merges_into = ?")->execute([$target_id, $source_id]);
-            $db->prepare("INSERT OR IGNORE INTO product_aliases (raw_name, canonical_product_id) VALUES (?, ?)")
-               ->execute([$source['name'], $target_id]);
+            $alias = $db->prepare("INSERT OR IGNORE INTO product_aliases (raw_name, canonical_product_id) VALUES (?, ?)");
+            $alias->execute([$source['name'], $target_id]);
             $db->prepare("UPDATE products SET merges_into = ? WHERE id = ?")->execute([$target_id, $source_id]);
+            if ($nameFrom === 'source' && $source['name'] !== $target['name']) {
+                $alias->execute([$target['name'], $target_id]);
+                $db->prepare("UPDATE products SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$source['name'], $target_id]);
+            }
         }
         if ($ownsTransaction) $db->commit();
         return ['status' => 'success'];

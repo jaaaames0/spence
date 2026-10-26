@@ -128,3 +128,22 @@ body { background-color: #121212; color: #e0e0e0; font-family: 'Inter', sans-ser
 
 /* Log table: mobile macro badges inside item cell */
 .mob-macro-line { font-size: 0.65rem; line-height: 1.6; }
+
+/* Merge review: side-by-side product comparison with name/macro choices */
+.merge-review { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 12px; }
+.merge-review.active { border-color: #00A3FF; }
+.merge-grid { display: grid; grid-template-columns: 5.5rem 1fr 1fr; gap: 4px 10px; align-items: start; font-size: 0.85rem; }
+.merge-head { color: #888; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; }
+.merge-label { color: #888; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; padding-top: 6px; }
+.merge-info { color: #bbb; padding: 2px 0 2px 6px; }
+.merge-span { grid-column: span 2; }
+.merge-choice { display: flex; gap: 6px; align-items: flex-start; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; margin: 0; word-break: break-word; }
+.merge-choice input { margin-top: 3px; flex-shrink: 0; accent-color: #00A3FF; }
+.merge-choice.chosen { border-color: #00A3FF55; background: #00A3FF14; color: #fff; }
+.merge-differ { color: #ff9800; }
+@media (max-width: 575px) {
+    .merge-grid { grid-template-columns: 1fr 1fr; }
+    .merge-gap { display: none; }
+    .merge-label { grid-column: span 2; padding-top: 4px; }
+    .merge-span { grid-column: span 2; }
+}

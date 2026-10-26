@@ -284,9 +284,22 @@ try {
         echo json_encode(['status' => 'success']);
 
     } elseif ($action === 'merge') {
-        $blend = isset($_POST['blend_macros']) && $_POST['blend_macros'] === '1';
-        $result = executeProductMerge($db, (int)($_POST['source_id'] ?? 0), (int)($_POST['target_id'] ?? 0), $blend);
+        $macros = $_POST['macros'] ?? ((($_POST['blend_macros'] ?? '') === '1') ? 'blend' : 'target');
+        if (!in_array($macros, ['target', 'source', 'blend'], true)) throw new Exception("Invalid macros choice.");
+        $nameFrom = ($_POST['name_from'] ?? 'target') === 'source' ? 'source' : 'target';
+        $targetId = (int)($_POST['target_id'] ?? 0);
+        $result = executeProductMerge($db, (int)($_POST['source_id'] ?? 0), $targetId, $macros, $nameFrom);
+        if ($result['status'] === 'success') {
+            // Recipes using the merged product pick up its (possibly new) macros
+            $stmt = $db->prepare("SELECT DISTINCT r.id FROM recipes r JOIN recipe_ingredients ri ON ri.recipe_id = r.id WHERE r.is_active = 1 AND ri.product_id = ?");
+            $stmt->execute([resolveCanonicalProductId($db, $targetId)]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $recipeId) syncRecipeToProduct($db, (int)$recipeId);
+        }
         echo json_encode($result);
+
+    } elseif ($action === 'merge_preview') {
+        $ids = array_filter(array_map('intval', explode(',', $_POST['ids'] ?? '')));
+        echo json_encode(['status' => 'success', 'products' => array_values(array_filter(array_map(fn($id) => productMergePreview($db, $id), $ids)))]);
 
     } elseif ($action === 'dismiss_dedupe_pair') {
         $id_a = (int)($_POST['id_a'] ?? 0);

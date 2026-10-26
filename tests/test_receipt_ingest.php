@@ -116,6 +116,67 @@ try {
     assertSameValue(0, $productId('Tuna Meal C'), 'Renamed product was duplicated under its old name');
     assertSameValue(5.0, (float)$db->query("SELECT SUM(current_qty) FROM inventory WHERE product_id = $c")->fetchColumn(), 'Old name did not resolve through the alias');
 
+    // ── Merge choices: name, macros and unit conversion ─────────────────────
+    ingestAsJob($db, [
+        receiptItem('Choc Bar Each', 'Snacks/Confectionary', ['amount' => 4, 'weight_per_ea' => 0.05, 'kj_per_100' => 2000, 'protein_per_100' => 6]),
+        receiptItem('Choc Bar Bulk', 'Snacks/Confectionary', ['amount' => 0.5, 'unit' => 'kg', 'weight_per_ea' => 1.0, 'kj_per_100' => 1800, 'protein_per_100' => 4]),
+    ]);
+    [$each, $bulk] = [$productId('Choc Bar Each'), $productId('Choc Bar Bulk')];
+    assertSameValue('success', executeProductMerge($db, $each, $bulk, 'blend', 'source')['status'], 'Cross-unit merge failed');
+    $survivor = $db->query("SELECT name, kj_per_100, protein_per_100 FROM products WHERE id = $bulk")->fetch(PDO::FETCH_ASSOC);
+    assertSameValue(['name' => 'Choc Bar Each', 'kj_per_100' => 1900.0, 'protein_per_100' => 5.0], $survivor, 'Merge did not keep the chosen name and averaged macros');
+    assertSameValue(0.7, round((float)$db->query("SELECT SUM(current_qty) FROM inventory WHERE product_id = $bulk")->fetchColumn(), 3), 'Each stock was not converted to kg on merge');
+    assertSameValue($bulk, (int)findProductByName($db, 'Choc Bar Bulk')['id'], 'Survivor lost its old name as an alias');
+
+    // ── AI catalogue matching ───────────────────────────────────────────────
+    ingestAsJob($db, [receiptItem('Cheese Slices, Extra Tasty', 'Dairy'), receiptItem('Protein Bar, Musashi Choc Brownie', 'Snacks/Confectionary')]);
+    [$cheese, $bar] = [$productId('Cheese Slices, Extra Tasty'), $productId('Protein Bar, Musashi Choc Brownie')];
+    $requests = [];
+    $model = function (array $verdicts) use (&$requests) {
+        return function (array $request) use ($verdicts, &$requests) {
+            $requests[] = $request;
+            return json_encode(['matches' => $verdicts]);
+        };
+    };
+    $receipt = [
+        receiptItem('Extra Tasty Cheese Slices', 'Dairy'),
+        receiptItem('Extra Tasty Cheese Slices', 'Dairy'),
+        receiptItem('Musashi Protein Bar Salted Caramel', 'Snacks/Confectionary'),
+        receiptItem('Dragon Fruit', 'Fruit and Veg'),
+        receiptItem('Ground Cumin', 'Spice/Herb'),
+        receiptItem('Bananas', 'Fruit and Veg'),
+    ];
+    $matched = matchReceiptItemsWithAi($db, $receipt, $model([
+        ['index' => 0, 'verdict' => 'same', 'product_id' => $cheese],
+        ['index' => 1, 'verdict' => 'similar', 'product_id' => $bar],
+        ['index' => 2, 'verdict' => 'same', 'product_id' => 999999],
+    ]), 'test-model');
+    assertSameValue(1, count($requests), 'Matching made more than one model call');
+    $prompt = $requests[0]['messages'][0]['content'];
+    assertSameValue(true, str_contains($prompt, "{$cheese} | Cheese Slices, Extra Tasty | Dairy"), 'Catalogue missing from the prompt');
+    $sent = substr($prompt, strpos($prompt, 'Receipt items'));
+    assertSameValue(false, str_contains($sent, 'Bananas'), 'Known product was sent for matching');
+    assertSameValue(false, str_contains($sent, 'Ground Cumin'), 'Spice was sent for matching');
+    assertSameValue(1, substr_count($sent, 'Extra Tasty Cheese Slices'), 'Repeated receipt line was sent twice');
+    assertSameValue([$cheese, $cheese], [$matched[0]['match_product_id'] ?? null, $matched[1]['match_product_id'] ?? null], 'Same-product verdict not applied to every line of that item');
+    assertSameValue($bar, $matched[2]['similar_product_id'] ?? null, 'Similar verdict not applied');
+    assertSameValue(false, isset($matched[3]['match_product_id']) || isset($matched[3]['similar_product_id']), 'Invented product id was trusted');
+
+    $before = (float)$db->query("SELECT COALESCE(SUM(current_qty), 0) FROM inventory WHERE product_id = $cheese")->fetchColumn();
+    $db->prepare("INSERT INTO jobs (file_path, status, result_json) VALUES ('test', 'completed', '[]')")->execute();
+    $result = ingestReceiptItems($db, $matched, (int)$db->lastInsertId(), true);
+    assertSameValue($before + 2, (float)$db->query("SELECT SUM(current_qty) FROM inventory WHERE product_id = $cheese")->fetchColumn(), 'Matched item was not stocked on the existing product');
+    assertSameValue(0, $productId('Extra Tasty Cheese Slices'), 'Matched item created a duplicate product');
+    assertSameValue('Cheese Slices, Extra Tasty', $result['item_results'][0]['matched_to'] ?? null, 'Match was not reported');
+    assertSameValue($cheese, (int)findProductByName($db, 'Extra Tasty Cheese Slices')['id'], 'Receipt wording was not remembered as an alias');
+    $merges = $result['potential_merges'];
+    assertSameValue(1, count($merges), 'Expected only the similar verdict as a suggestion');
+    assertSameValue([$bar, 'AI: possible match'], [$merges[0]['target_id'], $merges[0]['reason']], 'Similar verdict did not become a merge suggestion');
+    assertSameValue('Protein Bar, Musashi Choc Brownie', $merges[0]['target']['name'] ?? null, 'Suggestion is missing the preview');
+
+    $failing = function () { throw new Exception('provider down'); };
+    assertSameValue(null, matchReceiptItemsWithAi($db, [receiptItem('Something Unseen', 'Other')], $failing, 'test-model'), 'A failed call did not signal fallback');
+
     // ── Wastage summary ─────────────────────────────────────────────────────
     $db->exec("DELETE FROM purchase_log");
     $db->exec("DELETE FROM waste_log");

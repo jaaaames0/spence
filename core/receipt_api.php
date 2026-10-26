@@ -137,11 +137,15 @@ try {
        ->execute([$targetPath, json_encode($items)]);
     $job_id = (int)$db->lastInsertId();
 
-    $result = ingestReceiptItems($db, $items, $job_id);
+    // A second, text-only call recognises products already in the catalogue under other names
+    $matched = matchReceiptItemsWithAi($db, $items, fn(array $req) => spenceNanoGptChatCompletion($api_key, $req), $request['model']);
+    $result = ingestReceiptItems($db, $matched ?? $items, $job_id, $matched !== null);
 
     $spiceCandidates = [];
     $spicesRestocked = [];
+    $aiMatches = [];
     foreach ($result['item_results'] as $index => $itemResult) {
+        if (isset($itemResult['matched_to'])) $aiMatches[$itemResult['product']] = $itemResult['matched_to'];
         if (!empty($itemResult['spice_candidate'])) $spiceCandidates[] = ['index' => $index, 'product' => $itemResult['product']];
         if ($itemResult['status'] === 'spice_restocked') $spicesRestocked[] = $itemResult['spice'];
     }
@@ -153,6 +157,8 @@ try {
         'potential_merges' => $result['potential_merges'],
         'spice_candidates' => $spiceCandidates,
         'spices_restocked' => array_values(array_unique($spicesRestocked)),
+        'ai_matches'       => array_map(fn($from, $to) => ['receipt' => $from, 'product' => $to], array_keys($aiMatches), $aiMatches),
+        'ai_matching'      => $matched !== null,
     ]);
 
 } catch (Exception $e) {
