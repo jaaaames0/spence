@@ -102,9 +102,12 @@ foreach ($log_entries as $entry) {
         
         $ratio = $entry['amount'] / ($entry['yield_serves'] ?: 1);
         $breakdown = [];
+        $raw_cost_total = 0;
         foreach ($ingredients as $ing) {
             $ing_weight = ($ing['unit'] === 'ea') ? ($ing['amount'] * $ing['weight_per_ea']) : $ing['amount'];
             $f = ($ing_weight / 0.1) * $ratio;
+            $cost = getUnitCost($db, $ing['product_id']) * $ing['amount'] * $ratio;
+            $raw_cost_total += $cost;
             $breakdown[] = [
                 'name' => $ing['product_name'],
                 'amount' => $ing['amount'] * $ratio,
@@ -112,8 +115,15 @@ foreach ($log_entries as $entry) {
                 'kj' => round($f * $ing['kj_per_100']),
                 'p' => round($f * $ing['protein_per_100'], 1),
                 'f' => round($f * $ing['fat_per_100'], 1),
-                'c' => round($f * $ing['carb_per_100'], 1)
+                'c' => round($f * $ing['carb_per_100'], 1),
+                'cost' => $cost
             ];
+        }
+        // Current ingredient prices give the split; scale it to the cost captured at log time so the rows sum to the entry
+        $entry_cost = $entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']);
+        if ($raw_cost_total > 0) {
+            foreach ($breakdown as &$b) $b['cost'] *= $entry_cost / $raw_cost_total;
+            unset($b);
         }
         $recipe_breakdowns[$entry['id']] = $breakdown;
     }
@@ -220,7 +230,8 @@ include '../core/page_head.php';
                                 <td class="d-none d-md-table-cell text-center color-p small"><?= number_format($ing['p'], 1) ?>g</td>
                                 <td class="d-none d-md-table-cell text-center color-f small"><?= number_format($ing['f'], 1) ?>g</td>
                                 <td class="d-none d-md-table-cell text-center color-c small"><?= number_format($ing['c'], 1) ?>g</td>
-                                <td colspan="2"></td>
+                                <td class="d-none d-md-table-cell text-center color-cost small">$<?= number_format($ing['cost'], 2) ?></td>
+                                <td></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

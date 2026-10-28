@@ -112,7 +112,7 @@ include '../core/page_head.php';
                     <th class="col-location d-none d-md-table-cell" style="width: 120px;"><a href="<?= sortUrl('location', $sort, $order) ?>" class="<?= $sort==='location'?'text-accent fw-black':'text-white' ?>">LOCATION <?= $sort==='location'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="col-expiry d-none d-md-table-cell" style="width: 115px;"><a href="<?= sortUrl('expiry_date', $sort, $order) ?>" class="<?= $sort==='expiry_date'?'text-accent fw-black':'text-white' ?>">EXPIRY <?= $sort==='expiry_date'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
                     <th class="col-category d-none d-md-table-cell" style="width: 120px;"><a href="<?= sortUrl('category', $sort, $order) ?>" class="<?= $sort==='category'?'text-accent fw-black':'text-white' ?>">CATEGORY <?= $sort==='category'?($order==='ASC'?'↑':'↓'):'' ?></a></th>
-                    <th class="text-end text-muted" style="width: 100px;">ACTIONS</th>
+                    <th class="text-end text-muted" style="width: 125px;">ACTIONS</th>
                 </tr></thead>
                 <tbody><?php foreach ($items as $item): ?>
                     <tr id="row-<?= $item['id'] ?>" class="viewing">
@@ -161,7 +161,7 @@ include '../core/page_head.php';
                             <div class="edit-mode"><input type="date" class="edit-input edit-expiry" value="<?= htmlspecialchars($item['expiry_date'] ?? '') ?>" onkeydown="handleKey(event, <?= $item['id'] ?>)"></div>
                         </td>
                         <td class="col-category d-none d-md-table-cell small uppercase text-muted"><?= htmlspecialchars($item['category']) ?></td>
-                        <td class="text-end">
+                        <td class="text-end text-nowrap">
                             <div class="view-mode row-actions">
                                 <button class="btn-icon" onclick="editRow(<?= $item['id'] ?>)"><i class="bi bi-pencil"></i></button>
                                 <button class="btn-icon text-warning" onclick="removeRow(<?= $item['id'] ?>, 'waste')" title="Wasted — counts toward wastage"><i class="bi bi-recycle"></i></button>
