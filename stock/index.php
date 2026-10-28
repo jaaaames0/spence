@@ -16,6 +16,8 @@ if ($sort === 'category') {
     $orderBy = getCategoryOrderSQL() . " $order, LOWER(p.name) ASC";
 } else {
     $orderBy = ($sort === 'name' ? "LOWER(p.name)" : $sort) . " $order";
+    // Rows with no expiry sink to the bottom whichever way expiry is sorted
+    if ($sort === 'expiry_date') $orderBy = "i.expiry_date IS NULL, $orderBy";
     if ($sort !== 'name') $orderBy .= ", LOWER(p.name) ASC";
 }
 
@@ -38,8 +40,11 @@ foreach($items as $item) { if($item['recipe_active'] === 0) $hasHistorical = tru
 $stmt = $db->query("SELECT id, name, base_unit FROM products WHERE merges_into IS NULL AND is_dropped = 0 ORDER BY name ASC");
 $all_products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Text/date columns open ascending; numeric columns (macros, price, density) open descending
 function sortUrl($col, $currentSort, $currentOrder) {
-    $newOrder = ($currentSort === $col && $currentOrder === 'ASC') ? 'DESC' : 'ASC';
+    $firstOrder = in_array($col, ['name', 'location', 'expiry_date', 'category']) ? 'ASC' : 'DESC';
+    $flipped = $firstOrder === 'ASC' ? 'DESC' : 'ASC';
+    $newOrder = ($currentSort === $col && $currentOrder === $firstOrder) ? $flipped : $firstOrder;
     return "?sort=$col&order=$newOrder";
 }
 $page_title   = 'Stock';
@@ -49,6 +54,9 @@ $extra_styles = '<style>
     .editing .view-mode { display: none !important; }
     .viewing .edit-mode { display: none !important; }
     .btn-icon:hover .bi-arrow-counterclockwise { color: #00A3FF; }
+    .row-actions .btn-icon { color: #555 !important; }
+    .row-actions .btn-icon:hover { color: #888 !important; }
+    .row-actions .btn-icon:hover .bi-recycle { color: #ffc107; }
     th a { color: inherit; text-decoration: none; display: block; }
     th a:hover { color: #fff; }
 </style>';
@@ -148,7 +156,7 @@ include '../core/page_head.php';
                         </td>
                         <td class="col-category d-none d-md-table-cell small uppercase text-muted"><?= htmlspecialchars($item['category']) ?></td>
                         <td class="text-end">
-                            <div class="view-mode">
+                            <div class="view-mode row-actions">
                                 <button class="btn-icon" onclick="editRow(<?= $item['id'] ?>)"><i class="bi bi-pencil"></i></button>
                                 <button class="btn-icon text-warning" onclick="removeRow(<?= $item['id'] ?>, 'waste')" title="Wasted — counts toward wastage"><i class="bi bi-recycle"></i></button>
                                 <button class="btn-icon" onclick="removeRow(<?= $item['id'] ?>, 'delete')" title="Delete — correction, not wastage"><i class="bi bi-trash"></i></button>
@@ -664,6 +672,12 @@ include '../core/page_head.php';
                     spiceData = spiceData.filter(s => s.id != id);
                     renderSpices();
                 });
+        }
+
+        // Dashboard "Scan Receipt" picks the photo there and hands it over
+        if (new URLSearchParams(location.search).has('scan')) {
+            history.replaceState(null, '', location.pathname);
+            takeHandoffFile().then(file => { if (file) receiptScan({ files: [file] }); });
         }
     </script>
 <?php include '../core/page_foot.php'; ?>

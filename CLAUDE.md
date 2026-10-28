@@ -67,7 +67,7 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 
 **Energy calibration** (`core/energy_calibration.php`): Maintenance = average intake − weight-trend slope × `ENERGY_KJ_PER_KG` over the current phase, after a 14-day transition when Forge supplies the cycle. Confidence is "high" when the estimate's standard error is within `ENERGY_HIGH_CONFIDENCE_KJ` (plus 28+ days, 6+ weigh-ins, 80% coverage). The prior-phase "last stable" estimate is anchored to the current phase start (not today), and is never used across a bulk↔cut flip; targets use the formula instead.
 
-**Shared UI helpers** (`core/spence.js`, loaded in `page_head.php`): `data-autofocus` focuses a field when its modal opens; `attachProductSearch()` is the type-to-search product picker (name-only, empty until typing, ↑/↓/Enter). Use it instead of `<datalist>`/`<select>` for product lists.
+**Shared UI helpers** (`core/spence.js`, loaded in `page_head.php`): `data-autofocus` focuses a field when its modal opens; `attachProductSearch()` is the type-to-search product picker (name-only, empty until typing, ↑/↓/Enter). Use it instead of `<datalist>`/`<select>` for product lists. `handoffFile(file, url)` / `takeHandoffFile()` carry a picked photo across a navigation via IndexedDB (dashboard Scan Receipt → `stock/?scan=1`, camera → `eat/?quick=photo`; `eat/?quick=existing` opens the product picker).
 
 **Mobile layout**: `core/spence.css` contains all responsive overrides. `d-none d-md-table-cell` hides secondary table columns on mobile. `.mob-detail-row` expands per-row detail on mobile (suppressed via CSS at md+). Section headers use Bootstrap `col-6 col-md-*` for inline heading+date on log pages.
 

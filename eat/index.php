@@ -737,5 +737,13 @@ include '../core/page_head.php';
                 qeSearchInput.focus();
             });
     }
+
+    // Dashboard quick actions: ?quick=existing opens the picker, ?quick=photo collects a handed-off photo
+    const quickMode = new URLSearchParams(location.search).get('quick');
+    if (quickMode) {
+        history.replaceState(null, '', location.pathname);
+        if (quickMode === 'existing') openQuickEatExisting();
+        if (quickMode === 'photo') takeHandoffFile().then(file => { if (file) qeNewFoodSelected({ files: [file] }); });
+    }
     </script>
 <?php include '../core/page_foot.php'; ?>

@@ -41,9 +41,21 @@ $stmt = $db->query("
     ORDER BY $orderBy");
 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Macro sanity check: kJ should be close to (P×4 + F×9 + C×4) × 4.184. Fibre and alcohol
+// carry energy that isn't in P/F/C, so only flag gaps beyond 15% (and 60 kJ for low-energy foods).
+foreach ($products as &$p) {
+    $p['macro_kj'] = ((float)$p['protein_per_100'] * 4 + (float)$p['fat_per_100'] * 9 + (float)$p['carb_per_100'] * 4) * 4.184;
+    $gap = abs((float)$p['kj_per_100'] - $p['macro_kj']);
+    $p['macro_off'] = $gap > max(60, 0.15 * max((float)$p['kj_per_100'], $p['macro_kj']));
+}
+unset($p);
+$macroOffCount = count(array_filter($products, fn($p) => $p['macro_off']));
+$macroCheck = !empty($_GET['check']);
+if ($macroCheck) $products = array_values(array_filter($products, fn($p) => $p['macro_off']));
+
 function sortUrl($col, $currentSort, $currentOrder) {
     $newOrder = ($currentSort === $col && $currentOrder === 'ASC') ? 'DESC' : 'ASC';
-    return "?sort=$col&order=$newOrder";
+    return "?sort=$col&order=$newOrder" . (!empty($_GET['check']) ? '&check=1' : '');
 }
 $page_title   = 'Product Master';
 $page_context = 'settings';
@@ -80,8 +92,11 @@ include '../core/page_head.php';
         </ul>
 
         <div class="card border-secondary overflow-hidden mb-5">
-            <div class="card-header bg-transparent border-secondary p-3">
+            <div class="card-header bg-transparent border-secondary p-3 d-flex align-items-center justify-content-between">
                 <h6 class="text-white opacity-50 uppercase small mb-0 fw-bold">Active Product Master</h6>
+                <a class="btn btn-sm fw-bold <?= $macroCheck ? 'btn-warning' : 'btn-outline-secondary' ?>" href="?sort=<?= $sort ?>&order=<?= $order ?><?= $macroCheck ? '' : '&check=1' ?>" title="Products whose kJ disagrees with (P×4 + F×9 + C×4) × 4.184 by more than 15%">
+                    <i class="bi bi-exclamation-triangle"></i> MACRO CHECK (<?= $macroOffCount ?>)
+                </a>
             </div>
             <div class="table-responsive"><table class="table table-dark table-hover mb-0 align-middle">
                 <thead><tr class="text-muted small">
@@ -125,7 +140,7 @@ include '../core/page_head.php';
                             </div>
                         </td>
                         <td class="text-center">
-                            <div class="view-mode"><?= round($p['kj_per_100']) ?></div>
+                            <div class="view-mode"><?php if ($p['macro_off']): ?><span class="text-warning" title="Macros give ≈<?= round($p['macro_kj']) ?> kJ"><?= round($p['kj_per_100']) ?> <i class="bi bi-exclamation-triangle-fill"></i><br><small class="text-muted">≈<?= round($p['macro_kj']) ?></small></span><?php else: ?><?= round($p['kj_per_100']) ?><?php endif; ?></div>
                             <div class="edit-mode"><input type="number" class="edit-input edit-kj text-center" value="<?= round($p['kj_per_100']) ?>" onkeydown="handleKey(event, <?= $p['id'] ?>)"></div>
                         </td>
                         <td class="text-center">

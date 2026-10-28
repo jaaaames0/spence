@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/spence/core/spence.css?v=5">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/spence/core/spence.js?v=2"></script>
+    <script src="/spence/core/spence.js?v=3"></script>
     <?= $extra_head ?? '' ?>
     <?= $extra_styles ?? '' ?>
 </head>

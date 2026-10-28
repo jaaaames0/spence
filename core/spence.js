@@ -197,3 +197,35 @@ function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel
 
     return { apply };
 }
+
+/**
+ * Carry a picked file across a page navigation (dashboard quick actions). The file picker
+ * needs a click on the page that opens it, so the dashboard picks the photo and the target
+ * page collects it. IndexedDB holds the Blob; sessionStorage can't fit a receipt photo.
+ */
+function spenceFileStore(mode, fn) {
+    return new Promise((resolve, reject) => {
+        const open = indexedDB.open('spence-handoff', 1);
+        open.onupgradeneeded = () => open.result.createObjectStore('files');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const tx = open.result.transaction('files', mode);
+            const req = fn(tx.objectStore('files'));
+            tx.oncomplete = () => resolve(req.result);
+            tx.onerror = () => reject(tx.error);
+        };
+    });
+}
+
+function handoffFile(file, url) {
+    spenceFileStore('readwrite', store => store.put(file, 'pending'))
+        .then(() => { location.href = url; })
+        .catch(() => alert('Could not hand the photo over — open the page and pick it there.'));
+}
+
+// Resolves to the handed-off File (or null) and clears it so a reload doesn't rescan.
+function takeHandoffFile() {
+    return spenceFileStore('readwrite', store => store.get('pending'))
+        .then(file => spenceFileStore('readwrite', store => store.delete('pending')).then(() => file || null))
+        .catch(() => null);
+}
