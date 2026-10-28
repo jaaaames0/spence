@@ -4,6 +4,7 @@
  */
 require_once 'core/auth.php';
 require_once 'core/db_helper.php';
+require_once 'core/food_sources.php';
 $db = get_db_connection();
 
 $tz    = SPENCE_TIMEZONE_OFFSET;
@@ -65,73 +66,23 @@ foreach ($trend_rows as $row) {
     if (isset($trend_data[$row['day']])) $trend_data[$row['day']] = (int)$row['total_kj'];
 }
 
-// ── Biggest energy / protein sources, most eaten ─────────────────────────────
-// 'meal' ranks what was logged; 'ingredient' splits each logged meal across its recipe's
-// ingredients (kJ by kJ share, protein by protein share, weight by weight share) so a curry
-// credits its chicken and rice. qty is serves of cooked recipes in 'meal' mode and kg eaten
-// in 'ingredient' mode, so 12 eggs compare with bacon by weight rather than by count.
-function getTopSources(PDO $db, ?int $days, string $mode): array {
-    $window = $days ? "cl.consumed_at >= datetime('now', '-$days days')" : '1 = 1';
-    $ingKg = "(CASE WHEN ri.unit = 'ea' THEN ri.amount * ip.weight_per_ea ELSE ri.amount END)";
-    $logKg = "(CASE WHEN cl.unit = 'ea' THEN cl.amount * COALESCE(p.weight_per_ea, cl.quick_eat_weight_per_ea, 0) ELSE cl.amount END)";
-    // Merged products show as their survivor; recipe forks show as the recipe they forked from
-    $named = fn(string $alias) => "COALESCE(
-        (SELECT rp.name FROM recipes r JOIN recipes rp ON rp.id = r.parent_recipe_id WHERE r.id = $alias.recipe_id),
-        (SELECT name FROM products WHERE id = $alias.merges_into), $alias.name)";
-    if ($mode === 'ingredient') {
-        $sql = "WITH ing AS (
-                SELECT ri.recipe_id, {$named('ip')} AS name, $ingKg AS kg,
-                       ip.kj_per_100 * $ingKg / 0.1 AS kj, ip.protein_per_100 * $ingKg / 0.1 AS protein
-                FROM recipe_ingredients ri JOIN products ip ON ip.id = ri.product_id),
-            tot AS (SELECT recipe_id, SUM(kj) AS kj, SUM(protein) AS protein, SUM(kg) AS kg
-                    FROM ing GROUP BY recipe_id HAVING SUM(kg) > 0)
-            SELECT ing.name,
-                   COALESCE(cl.kj * ing.kj / NULLIF(tot.kj, 0), 0) AS kj,
-                   COALESCE(cl.protein * ing.protein / NULLIF(tot.protein, 0), 0) AS protein,
-                   $logKg * ing.kg / tot.kg AS qty
-            FROM consumption_log cl
-            JOIN products p ON p.id = cl.product_id
-            JOIN tot ON tot.recipe_id = p.recipe_id
-            JOIN ing ON ing.recipe_id = p.recipe_id
-            WHERE $window
-            UNION ALL
-            SELECT COALESCE({$named('p')}, cl.name), cl.kj, cl.protein, $logKg
-            FROM consumption_log cl
-            LEFT JOIN products p ON p.id = cl.product_id
-            WHERE $window AND (p.recipe_id IS NULL OR p.recipe_id NOT IN (SELECT recipe_id FROM tot))";
-    } else {
-        $sql = "SELECT COALESCE({$named('p')}, cl.name) AS name, cl.kj, cl.protein,
-                   CASE WHEN p.type = 'cooked' THEN (CASE WHEN cl.unit = 'ea' THEN cl.amount ELSE cl.amount / NULLIF(p.weight_per_ea, 0) END) ELSE 0 END AS qty
-            FROM consumption_log cl LEFT JOIN products p ON p.id = cl.product_id
-            WHERE $window";
-    }
-    $metrics = ['kj', 'protein', 'qty'];
-    $totals = [];
-    foreach ($db->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $name = $row['name'] ?? '—';
-        foreach ($metrics as $metric) $totals[$name][$metric] = ($totals[$name][$metric] ?? 0) + max(0, (float)$row[$metric]);
-    }
-    $top = [];
-    foreach ($metrics as $metric) {
-        $sum = array_sum(array_column($totals, $metric));
-        $ranked = array_filter(array_map(fn($name, $t) => ['name' => $name, 'value' => $t[$metric],
-            'pct' => $sum > 0 ? round($t[$metric] * 100 / $sum, 1) : 0], array_keys($totals), $totals), fn($r) => $r['value'] > 0);
-        usort($ranked, fn($a, $b) => $b['value'] <=> $a['value']);
-        $top[$metric] = array_slice($ranked, 0, 3);
-    }
-    return $top;
-}
+// ── Biggest energy / protein sources, most eaten (full lists: log/leaderboard.php) ──
+// qty is serves of cooked recipes in 'meal' mode and kg eaten in 'ingredient' mode, so 12 eggs
+// compare with bacon by weight rather than by count.
 function formatSourceValue(string $metric, string $mode, float $value): string {
     if ($metric === 'kj') return number_format($value);
     if ($metric === 'protein') return round($value) . 'g';
     if ($mode === 'meal') return round($value, 1) . ' serves';
-    return $value >= 1 ? round($value, 1) . 'kg' : round($value * 1000) . 'g';
+    return formatFoodWeight($value);
 }
 $source_periods = ['7' => '7D', '30' => '30D', 'all' => 'ALL'];
 $top_sources = [];
 foreach (array_keys($source_periods) as $period) {
     foreach (['meal', 'ingredient'] as $mode) {
-        $top_sources[$period][$mode] = getTopSources($db, $period === 'all' ? null : (int)$period, $mode);
+        $foods = getFoodSources($db, $period === 'all' ? null : (int)$period, $mode);
+        foreach ($foods as &$food) $food['qty'] = $mode === 'meal' ? $food['serves'] : $food['kg'];
+        unset($food);
+        foreach (['kj', 'protein', 'qty'] as $metric) $top_sources[$period][$mode][$metric] = rankFoodSources($foods, $metric, 3);
     }
 }
 
@@ -236,6 +187,10 @@ $extra_styles = '<style>
     .src-toggle button.active { color: #e0e0e0; border-color: #444; background: #1e1e1e; }
     .src-list { display: none; }
     .src-list.active { display: block; }
+    a.dash-link { color: inherit; text-decoration: none; transition: border-color 0.2s; }
+    a.dash-link:hover { border-color: #3a3a3a; }
+    .src-more { color: #444; text-decoration: none; font-size: 0.75rem; margin-left: 2px; }
+    .src-more:hover { color: #e0e0e0; }
     .top-pct {
         font-size: 0.65rem;
         color: #666;
@@ -264,7 +219,7 @@ include 'core/page_head.php';
 
         <!-- Today's Energy -->
         <div class="col-6 col-lg-4">
-            <div class="dash-card">
+            <a href="log/" class="dash-card dash-link">
                 <div class="dash-label">Today's Energy</div>
                 <div class="dash-value" style="color:#ff9800;"><?= number_format($today_kj) ?></div>
                 <div style="font-size:0.7rem; color:#888; margin-top:2px;">kJ consumed</div>
@@ -272,12 +227,12 @@ include 'core/page_head.php';
                     <div class="dash-progress-bar" style="width:<?= $kj_pct ?>%; background:#ff9800;"></div>
                 </div>
                 <div class="dash-pct" style="color:#ff9800;"><?= $kj_pct ?>% <span style="color:#666;">of <?= number_format($goal_kj) ?> kJ goal</span></div>
-            </div>
+            </a>
         </div>
 
         <!-- Today's Protein -->
         <div class="col-6 col-lg-4">
-            <div class="dash-card">
+            <a href="log/" class="dash-card dash-link">
                 <div class="dash-label">Today's Protein</div>
                 <div class="dash-value" style="color:#00A3FF;"><?= $today_protein ?><span style="font-size:1rem; font-weight:700;">g</span></div>
                 <div style="font-size:0.7rem; color:#888; margin-top:2px;">protein consumed</div>
@@ -285,27 +240,27 @@ include 'core/page_head.php';
                     <div class="dash-progress-bar" style="width:<?= $prot_pct ?>%; background:#00A3FF;"></div>
                 </div>
                 <div class="dash-pct" style="color:#00A3FF;"><?= $prot_pct ?>% <span style="color:#666;">of <?= $goal_p ?>g goal</span></div>
-            </div>
+            </a>
         </div>
 
         <!-- 7-day kJ Trend -->
         <div class="col-12 col-lg-4">
-            <div class="dash-card">
+            <a href="log/weekly.php" class="dash-card dash-link">
                 <div class="dash-label">7-Day Energy Trend</div>
                 <div style="flex:1; min-height:90px; position:relative;">
                     <canvas id="trendChart"></canvas>
                 </div>
                 <div class="dash-sub">kJ per day &middot; goal <span style="color:#ff9800;"><?= number_format($goal_kj) ?></span> kJ</div>
-            </div>
+            </a>
         </div>
 
         <!-- Pantry Value -->
         <div class="col-6 col-lg-4">
-            <div class="dash-card">
+            <a href="stock/?sort=price_paid&amp;order=DESC" class="dash-card dash-link">
                 <div class="dash-label">Pantry Value</div>
                 <div class="dash-value" style="color:#4caf50;"><span style="font-size:1.1rem;">$</span><?= $inv_value ?></div>
                 <div class="dash-sub"><?= $inv_products ?> product<?= $inv_products !== 1 ? 's' : '' ?> currently in stock</div>
-            </div>
+            </a>
         </div>
 
         <!-- Monthly Spend Projection -->
@@ -320,7 +275,7 @@ include 'core/page_head.php';
 
         <!-- Expiring Soon -->
         <div class="col-12 col-lg-4">
-            <div class="dash-card" style="<?= $expiring_items ? 'border-color:#6b4a1d;' : '' ?>">
+            <a href="stock/?sort=expiry_date&amp;order=ASC" class="dash-card dash-link" style="<?= $expiring_items ? 'border-color:#6b4a1d;' : '' ?>">
                 <div class="dash-label">Expiring Soon</div>
                 <?php if ($expiring_items): ?>
                     <?php foreach ($expiring_items as $item): ?>
@@ -335,7 +290,7 @@ include 'core/page_head.php';
                     <div class="dash-placeholder">—</div>
                     <div class="dash-sub">No short-life items due soon</div>
                 <?php endif; ?>
-            </div>
+            </a>
         </div>
 
         <!-- Biggest Energy / Protein Sources, Favourite Meals — share the period + mode toggles -->
@@ -348,7 +303,7 @@ include 'core/page_head.php';
         <div class="col-12 col-md-6 col-lg-4">
             <div class="dash-card">
                 <div class="d-flex justify-content-between align-items-baseline gap-2">
-                    <div class="dash-label"><?= $label ?></div>
+                    <div class="dash-label"><?= $label ?> <a href="log/leaderboard.php" class="src-more" data-sort="<?= $metric ?>" title="Full leaderboard"><i class="bi bi-list-ol"></i></a></div>
                     <div class="src-toggle" data-toggle="period">
                         <?php foreach ($source_periods as $period => $periodLabel): ?><button type="button" data-value="<?= $period ?>"><?= $periodLabel ?></button><?php endforeach; ?>
                     </div>
@@ -390,6 +345,10 @@ include 'core/page_head.php';
         document.querySelectorAll('[data-show-mode]').forEach(el => el.classList.toggle('d-none', el.dataset.showMode !== state.mode));
         document.querySelectorAll('.src-list').forEach(list =>
             list.classList.toggle('active', list.dataset.period === state.period && list.dataset.mode === state.mode));
+        document.querySelectorAll('.src-more').forEach(a => {
+            const sort = a.dataset.sort === 'qty' ? (state.mode === 'meal' ? 'serves' : 'kg') : a.dataset.sort;
+            a.href = 'log/leaderboard.php?' + new URLSearchParams({ period: state.period, mode: state.mode, sort });
+        });
     }
     document.querySelectorAll('.src-toggle button').forEach(b => b.addEventListener('click', () => {
         state[b.parentElement.dataset.toggle] = b.dataset.value;
