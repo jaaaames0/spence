@@ -9,7 +9,7 @@ SPENCE is a self-hosted nutritional logging, recipe, and kitchen inventory app. 
 - **Backend:** PHP 8.2+, no framework — files served directly by Nginx + PHP-FPM
 - **Database:** SQLite 3 (WAL mode) via PDO — single-file, portable
 - **Frontend:** Bootstrap 5.3 dark theme, Bootstrap Icons, Chart.js 4.x, vanilla JS (`fetch()` only)
-- **AI Vision:** OpenRouter API (Gemini Flash default; any OpenAI-compatible vision endpoint) via `receipt_api.php`
+- **AI Vision:** NanoGPT (`google/gemini-3.7-flash`) via `core/nanogpt_client.php`, used by `receipt_api.php` and `quick_eat_api.php`
 - **Auth:** HMAC cookie — 1-year token derived from `hash_hmac('sha256', 'spence_auth_v1', $ACCESS_KEY)`, survives session GC
 - **PWA:** `site.webmanifest`, SVG favicon, mobile-web-app-capable meta tags
 - **Sister app:** FORGE (`/srv/jaaaames.com/forge/`) — same architecture, shared patterns
@@ -18,7 +18,7 @@ SPENCE is a self-hosted nutritional logging, recipe, and kitchen inventory app. 
 
 ```
 /spence/
-  index.php            ← Intelligence Dashboard (4×2 live metrics)
+  index.php            ← Intelligence Dashboard (3×3 cards + quick actions)
   stock/               ← Inventory management + receipt scan + Spice Rack modal
   eat/                 ← Consume items from inventory by weight or unit
   cook/                ← Browse/execute recipes, live macro preview, substitutions
@@ -26,12 +26,15 @@ SPENCE is a self-hosted nutritional logging, recipe, and kitchen inventory app. 
   log/                 ← Daily/weekly macro summaries, charts, composition
   settings/            ← User profile, TDEE, macro targets, product master
   core/
-    auth.php           ← HMAC cookie auth; ACCESS_KEY constant must be changed
+    auth.php           ← HMAC cookie auth; access key read from SPENCE_CREDENTIAL_FILE
+    runtime_config.php ← Credential-file and path helpers (spenceReadCredential)
     db_helper.php      ← PDO singleton, WAL, helpers, spice rack auto-migrate
     api.php            ← Inventory, products, jobs CRUD
     raid_api.php        ← Ghost Recipe Engine, cook execution, inventory deduction
-    receipt_api.php    ← Receipt scan → OpenRouter vision → ingest pipeline
-    bridge_ingest.php  ← Maps OpenRouter JSON output to DB inserts
+    receipt_api.php    ← Receipt scan → NanoGPT vision → ingest pipeline
+    nanogpt_client.php ← NanoGPT chat-completion client
+    receipt_ingest.php ← Maps vision JSON to DB inserts, AI catalogue matching
+    bridge_ingest.php  ← Legacy CLI bridge for completed jobs rows
     matching.php       ← Jaccard similarity + category locking deduplication
     ingredients_api.php ← Recipe ingredient helpers
     user_api.php        ← User profile/goals CRUD
@@ -51,7 +54,7 @@ SPENCE is a self-hosted nutritional logging, recipe, and kitchen inventory app. 
 - **Live macro feedback:** Every cook, every eat, every recipe build shows running macro totals in real time.
 - **Cost awareness:** Every item has a unit cost. Every cook has a per-serve cost. Monthly spend is projected from consumption data.
 - **Spice Rack:** Binary pantry staple tracking. Never run out of black pepper without knowing.
-- **Self-hosted sovereignty:** OpenRouter API key is the only external dependency. Everything else runs locally.
+- **Self-hosted sovereignty:** The NanoGPT API is the only external dependency. Everything else runs locally.
 
 ## Design Non-Goals
 
@@ -63,11 +66,10 @@ SPENCE is a self-hosted nutritional logging, recipe, and kitchen inventory app. 
 
 ## Runtime Topology
 
-- **Deployed:** `/srv/jaaaames.com/spence/` (Nginx vhost, PHP-FPM socket)
-- **Database:** `database/spence.db` — gitignored live data
-- **Auth key:** `core/auth.php` `ACCESS_KEY` constant — must be changed from default before network exposure
-- **OpenRouter key:** `core/openrouter.env` — single line, gitignored
-- **Migration target:** OptiPlex (same migration as FORGE) — pending hardware delivery
+- **Deployed:** versioned releases in `/usr/local/lib/spence/RELEASE`, served at `/srv/jaaaames.com/spence` by a dedicated PHP-FPM pool (see `DEPLOYMENT.md`)
+- **Database:** `/var/lib/spence/spence.db` — live data, outside the release
+- **Access key:** file at `SPENCE_CREDENTIAL_FILE` (production `/etc/spence/access-key`)
+- **NanoGPT key:** file at `NANOGPT_CREDENTIAL_FILE` (production `/etc/spence/nanogpt-key`)
 - **Access:** HTTPS only, HMAC cookie auth, 1-year token lifetime
 
 ## Key Design Decisions

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-SPENCE is a single-user PHP/SQLite kitchen inventory, recipe, and nutritional logging app. It uses OpenRouter (Gemini Flash) to parse grocery receipts via vision AI and auto-populate inventory. Designed for local-first personal use — not hardened for public internet exposure.
+SPENCE is a single-user PHP/SQLite kitchen inventory, recipe, and nutritional logging app. It uses NanoGPT (`google/gemini-3.7-flash`, via `core/nanogpt_client.php`) to parse grocery receipts and Quick Eat food photos with vision AI and auto-populate inventory. Designed for local-first personal use — not hardened for public internet exposure.
 
 ## Running the App
 
@@ -18,9 +18,9 @@ cp database/spence_empty.db database/spence.db
 chmod 666 database/spence.db
 ```
 
-**Receipt ingest** is synchronous — scanning a receipt completes the full pipeline (upload → OpenRouter vision → ingest → merge suggestions) in a single HTTP request via `core/receipt_api.php`. No background service required. `core/bridge_ingest.php` handles the JSON-to-DB mapping.
+**Receipt ingest** is synchronous — scanning a receipt completes the full pipeline (upload → NanoGPT vision → ingest → merge suggestions) in a single HTTP request via `core/receipt_api.php`; `ingestReceiptItems()` in `core/receipt_ingest.php` maps the JSON to DB inserts. No background service required. `core/bridge_ingest.php` is a legacy CLI bridge for completed `jobs` rows.
 
-**Auth key** is hardcoded in `core/auth.php` — change `"jaaaames_sovereign_2026"` before exposing to any network.
+**Credentials** are read from files by `spenceReadCredential()` (`core/runtime_config.php`): the access key from `SPENCE_CREDENTIAL_FILE` (default `/srv/secrets/spence_credentials.env`, production `/etc/spence/access-key`) and the NanoGPT key from `NANOGPT_CREDENTIAL_FILE`. The `SPENCE_ACCESS_KEY` / `NANOGPT_API_KEY` env vars are a local-development fallback only. See `DEPLOYMENT.md`.
 
 **Timezone** is hardcoded to `Australia/Sydney` in `core/db_helper.php`.
 
@@ -39,7 +39,7 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 **Core logic files:**
 - `core/db_helper.php` — PDO connection, `getUnitCost()`, `syncRecipeToProduct()` (recalculates macros/cost when recipe changes)
 - `core/matching.php` — Jaccard similarity deduplication during ingest
-- `core/bridge_ingest.php` — maps OpenRouter JSON output to DB inserts
+- `core/receipt_ingest.php` — maps the vision model's JSON output to DB inserts, AI catalogue matching
 
 **Database:** `database/schema.sql` is the canonical schema. `database/spence_empty.db` is the blank template committed to git. Live `spence.db` is gitignored.
 

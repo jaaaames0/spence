@@ -3,7 +3,7 @@
 
 SPENCE harnesses AI vision to parse grocery receipts — automatically sorting, categorising, and tracking your nutrition from shopping cart to pantry, fridge or freezer, to stovetop, and onwards as you use it to fuel your daily targets.
 
-> ⚠️ **Caution:** Designed for local-first, single-user personal use. Not hardened for public internet exposure. Change the auth key in `core/auth.php` before putting this anywhere near a network.
+> ⚠️ **Caution:** Designed for local-first, single-user personal use. Not hardened for public internet exposure. Set your own access key (see Installation) before putting this anywhere near a network.
 
 ---
 
@@ -35,7 +35,7 @@ SPENCE harnesses AI vision to parse grocery receipts — automatically sorting, 
 | Frontend | HTML, CSS, JavaScript |
 | UI Framework | Bootstrap 5.3 dark theme + Bootstrap Icons |
 | Charts | Chart.js 4.x |
-| AI Vision | OpenRouter (Gemini Flash default; any OpenAI-compatible vision endpoint) |
+| AI Vision | NanoGPT (`google/gemini-3.7-flash`) via `core/nanogpt_client.php` |
 | Web Server | Nginx or Apache with PHP-FPM |
 
 ---
@@ -44,7 +44,7 @@ SPENCE harnesses AI vision to parse grocery receipts — automatically sorting, 
 
 - Nginx or Apache with PHP-FPM 8.2+
 - SQLite3
-- An [OpenRouter](https://openrouter.ai) API key (or any OpenAI-compatible vision endpoint)
+- A [NanoGPT](https://nano-gpt.com) API key
 
 ---
 
@@ -70,15 +70,13 @@ chmod 666 database/spence.db
 
 ### 4. Set your API key
 
-Create `core/openrouter.env` containing your OpenRouter API key on a single line:
+Put your NanoGPT API key, alone on one line, in a file readable by the web server, and point `NANOGPT_CREDENTIAL_FILE` at its absolute path (default `/srv/secrets/nanogpt.env`).
 
-```
-sk-or-v1-your-key-here
-```
+### 5. Set your access key
 
-### 5. Set your auth key
+Put the access key you'll log in with, alone on one line, in a file readable by the web server, and point `SPENCE_CREDENTIAL_FILE` at it (default `/srv/secrets/spence_credentials.env`). SPENCE refuses all requests if no key is configured.
 
-Open `core/auth.php` and change the `ACCESS_KEY` constant from the default before exposing SPENCE to any network.
+For local development only, the `NANOGPT_API_KEY` and `SPENCE_ACCESS_KEY` environment variables are used when the files are absent. Production keeps credential values out of the PHP-FPM environment; see `DEPLOYMENT.md`.
 
 ### Optional: connect FORGE
 

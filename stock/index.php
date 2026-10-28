@@ -15,7 +15,13 @@ $order = ($order === 'ASC') ? 'ASC' : 'DESC';
 if ($sort === 'category') {
     $orderBy = getCategoryOrderSQL() . " $order, LOWER(p.name) ASC";
 } else {
-    $orderBy = ($sort === 'name' ? "LOWER(p.name)" : $sort) . " $order";
+    $sortExpr = match ($sort) {
+        'name' => 'LOWER(p.name)',
+        // Compare stock by weight so a dozen eggs doesn't outrank a kilo of bacon
+        'current_qty' => "(CASE WHEN p.base_unit = 'ea' THEN i.current_qty * p.weight_per_ea ELSE i.current_qty END)",
+        default => $sort,
+    };
+    $orderBy = "$sortExpr $order";
     // Rows with no expiry sink to the bottom whichever way expiry is sorted
     if ($sort === 'expiry_date') $orderBy = "i.expiry_date IS NULL, $orderBy";
     if ($sort !== 'name') $orderBy .= ", LOWER(p.name) ASC";
@@ -78,7 +84,7 @@ include '../core/page_head.php';
                 <form enctype="multipart/form-data" onsubmit="return false;" style="display:none;">
                     <input type="file" id="receiptInput" accept="image/*;capture=camera" onchange="receiptScan(this)">
                 </form>
-                <button type="button" class="btn btn-primary fw-bold" id="scanBtn" onclick="document.getElementById('receiptInput').click()" style="height: 38px;">SCAN RECEIPT</button>
+                <button type="button" class="btn btn-primary fw-bold" id="scanBtn" onclick="document.getElementById('receiptInput').click()" style="height: 38px;"><i class="bi bi-receipt me-1"></i>SCAN RECEIPT</button>
                 <button type="button" class="btn btn-outline-secondary fw-bold px-3" onclick="openAddModal()" style="height: 38px;" title="Manual Intake">+</button>
                 <button type="button" class="btn btn-outline-secondary fw-bold px-3" id="spiceBtn" style="height: 38px; position:relative;" title="Spice Rack" onclick="openSpiceModal()">
                     <i class="bi bi-fire"></i>
