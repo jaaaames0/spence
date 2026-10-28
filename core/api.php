@@ -273,6 +273,7 @@ try {
                 $db->prepare("UPDATE inventory SET current_qty = ?, unit = ? WHERE id = ?")
                    ->execute([$new_qty, $new_unit, $row['id']]);
             }
+            if ($old_unit === 'ea') convertEachHistoryToWeight($db, $id, $old_wpe, $new_unit);
         }
 
         $db->commit();

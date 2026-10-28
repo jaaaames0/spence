@@ -122,10 +122,13 @@ try {
         receiptItem('Choc Bar Bulk', 'Snacks/Confectionary', ['amount' => 0.5, 'unit' => 'kg', 'weight_per_ea' => 1.0, 'kj_per_100' => 1800, 'protein_per_100' => 4]),
     ]);
     [$each, $bulk] = [$productId('Choc Bar Each'), $productId('Choc Bar Bulk')];
+    $db->prepare("INSERT INTO consumption_log (product_id, amount, unit, kj) VALUES (?, 2, 'ea', 2000)")->execute([$each]);
     assertSameValue('success', executeProductMerge($db, $each, $bulk, 'blend', 'source')['status'], 'Cross-unit merge failed');
     $survivor = $db->query("SELECT name, kj_per_100, protein_per_100 FROM products WHERE id = $bulk")->fetch(PDO::FETCH_ASSOC);
     assertSameValue(['name' => 'Choc Bar Each', 'kj_per_100' => 1900.0, 'protein_per_100' => 5.0], $survivor, 'Merge did not keep the chosen name and averaged macros');
     assertSameValue(0.7, round((float)$db->query("SELECT SUM(current_qty) FROM inventory WHERE product_id = $bulk")->fetchColumn(), 3), 'Each stock was not converted to kg on merge');
+    $eaten = $db->query("SELECT amount, unit FROM consumption_log WHERE product_id = $bulk")->fetch(PDO::FETCH_ASSOC);
+    assertSameValue(['amount' => 0.1, 'unit' => 'kg'], ['amount' => round((float)$eaten['amount'], 3), 'unit' => $eaten['unit']], 'Each log entries were not converted to kg on merge');
     assertSameValue($bulk, (int)findProductByName($db, 'Choc Bar Bulk')['id'], 'Survivor lost its old name as an alias');
 
     // ── AI catalogue matching ───────────────────────────────────────────────

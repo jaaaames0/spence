@@ -288,6 +288,19 @@ function deductInventoryLots(PDO $db, int $productId, float $requiredQty, float 
 }
 
 /**
+ * When a product stops being counted by the item, its per-item history moves to weight.
+ * Log rows keep only amount + unit, so a '1 ea' left on a kg product would later be
+ * read through the kg product's placeholder weight_per_ea (1.0) as a whole kilo.
+ */
+function convertEachHistoryToWeight($db, $product_id, float $weight_per_ea, string $unit): void {
+    if ($unit === 'ea' || $weight_per_ea <= 0) return;
+    foreach (['consumption_log' => 'amount', 'purchase_log' => 'qty', 'waste_log' => 'qty'] as $table => $col) {
+        $db->prepare("UPDATE $table SET $col = $col * ?, unit = ? WHERE product_id = ? AND unit = 'ea'")
+           ->execute([$weight_per_ea, $unit, $product_id]);
+    }
+}
+
+/**
  * Helper to determine unit cost
  */
 function getUnitCost($db, $product_id) {

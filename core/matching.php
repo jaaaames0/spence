@@ -265,6 +265,9 @@ function executeProductMerge($db, $source_id, $target_id, string $macros = 'targ
                        ->execute([convertMergeQuantity((float)$ri['amount'], 'ea', $source, $target), $target['base_unit'], $ri['id']]);
                 }
             }
+            if ($source['base_unit'] === 'ea' && $target['base_unit'] !== 'ea') {
+                convertEachHistoryToWeight($db, $source_id, (float)$source['weight_per_ea'], $target['base_unit']);
+            }
             $db->prepare("UPDATE recipe_ingredients SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
             $db->prepare("UPDATE consumption_log SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
             $db->prepare("UPDATE purchase_log SET product_id = ? WHERE product_id = ?")->execute([$target_id, $source_id]);
