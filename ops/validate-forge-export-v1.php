@@ -31,7 +31,7 @@ $ok = true;
 
 $queries = [
     'workout_weights' => "SELECT started_at AS local_recorded_at, bodyweight_kg AS weight_kg, NULL AS body_fat_pct, 'Forge' AS source FROM workouts WHERE bodyweight_kg IS NOT NULL ORDER BY started_at, bodyweight_kg",
-    'body_fat' => "SELECT measured_at AS local_recorded_at, NULL AS weight_kg, caliper_bf_pct AS body_fat_pct, 'Forge' AS source FROM body_measurements WHERE caliper_bf_pct IS NOT NULL ORDER BY measured_at, caliper_bf_pct",
+    'body_fat' => "SELECT measured_at AS local_recorded_at, NULL AS weight_kg, COALESCE(smoothed_bf_pct, caliper_bf_pct) AS body_fat_pct, 'Forge' AS source FROM body_measurements WHERE COALESCE(smoothed_bf_pct, caliper_bf_pct) IS NOT NULL ORDER BY measured_at, body_fat_pct",
     'workout_history' => "SELECT DATE(started_at) AS day, type, ROUND((julianday(finished_at) - julianday(started_at)) * 1440) AS duration_minutes FROM workouts WHERE started_at IS NOT NULL ORDER BY started_at ASC",
     'active_regime' => "SELECT c.cycle_type, c.starts_at, c.ends_at, c.source, c.confidence FROM training_cycles c JOIN training_eras e ON e.id = c.era_id WHERE e.is_active = 1 ORDER BY c.starts_at DESC LIMIT 1",
 ];

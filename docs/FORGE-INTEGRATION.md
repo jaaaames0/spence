@@ -10,10 +10,15 @@ The publisher atomically replaces `/var/lib/forge/exports/spence-v1.db`. The
 version 1 contract contains only the tables and columns used by Spence:
 
 - `workouts(started_at, finished_at, type, bodyweight_kg)`
-- `body_measurements(measured_at, caliper_bf_pct)`
+- `body_measurements(measured_at, caliper_bf_pct, smoothed_bf_pct)`
 - `training_eras(id, is_active)`
 - `training_cycles(era_id, cycle_type, starts_at, ends_at, source, confidence)`
 - `forge_export_metadata(schema_version, exported_at_utc)`
+
+`smoothed_bf_pct` is Forge's smoothed body fat (Navy and caliper series averaged,
+stored by Forge schema migration v8). It was added compatibly: the publisher
+writes NULLs while Forge lacks the column, and Spence falls back to
+`caliper_bf_pct` for NULLs or for exports built before the column existed.
 
 The export is built in one SQLite read transaction, checked, synced, made
 read-only, and renamed over the prior export. An in-flight request can finish

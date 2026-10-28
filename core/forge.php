@@ -89,7 +89,11 @@ function getForgeVitalsHistory(): array {
 
     try {
         $weightStmt = $forge->query("SELECT started_at AS local_recorded_at, bodyweight_kg AS weight_kg, NULL AS body_fat_pct, 'Forge' AS source FROM workouts WHERE bodyweight_kg IS NOT NULL");
-        $bodyFatStmt = $forge->query("SELECT measured_at AS local_recorded_at, NULL AS weight_kg, caliper_bf_pct AS body_fat_pct, 'Forge' AS source FROM body_measurements WHERE caliper_bf_pct IS NOT NULL");
+        // Forge's smoothed figure (Navy + caliper average) where the export carries it; the raw
+        // caliper reading for older exports and eras Forge hasn't smoothed.
+        $hasSmoothed = (bool)$forge->query("SELECT 1 FROM pragma_table_info('body_measurements') WHERE name = 'smoothed_bf_pct'")->fetchColumn();
+        $bodyFat = $hasSmoothed ? 'COALESCE(smoothed_bf_pct, caliper_bf_pct)' : 'caliper_bf_pct';
+        $bodyFatStmt = $forge->query("SELECT measured_at AS local_recorded_at, NULL AS weight_kg, $bodyFat AS body_fat_pct, 'Forge' AS source FROM body_measurements WHERE $bodyFat IS NOT NULL");
         $history = array_merge($weightStmt->fetchAll(PDO::FETCH_ASSOC), $bodyFatStmt->fetchAll(PDO::FETCH_ASSOC));
         usort($history, fn($a, $b) => strcmp($a['local_recorded_at'], $b['local_recorded_at']));
         return $history;

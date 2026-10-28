@@ -19,7 +19,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-/usr/local/bin/sqlite3 "$temporary" <<'SQL'
+# smoothed_bf_pct arrives with Forge schema migration v8; publish NULLs until then so
+# the export never goes stale waiting on a Forge deploy.
+smoothed_source=NULL
+if test -n "$(/usr/local/bin/sqlite3 -readonly "$source_db" "SELECT 1 FROM pragma_table_info('body_measurements') WHERE name = 'smoothed_bf_pct';")"; then
+    smoothed_source=smoothed_bf_pct
+fi
+
+/usr/local/bin/sqlite3 "$temporary" <<SQL
 ATTACH DATABASE 'file:/var/lib/forge/forge.db?mode=ro' AS forge;
 PRAGMA main.journal_mode = DELETE;
 PRAGMA main.synchronous = FULL;
@@ -37,10 +44,11 @@ SELECT started_at, finished_at, type, bodyweight_kg FROM forge.workouts;
 
 CREATE TABLE body_measurements (
     measured_at TEXT,
-    caliper_bf_pct REAL
+    caliper_bf_pct REAL,
+    smoothed_bf_pct REAL
 );
-INSERT INTO body_measurements (measured_at, caliper_bf_pct)
-SELECT measured_at, caliper_bf_pct FROM forge.body_measurements;
+INSERT INTO body_measurements (measured_at, caliper_bf_pct, smoothed_bf_pct)
+SELECT measured_at, caliper_bf_pct, $smoothed_source FROM forge.body_measurements;
 
 CREATE TABLE training_eras (
     id INTEGER PRIMARY KEY,

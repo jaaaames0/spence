@@ -32,6 +32,18 @@ try {
     require_once __DIR__ . '/../core/forge.php';
 
     assertForgeValue(2, count(getForgeVitalsHistory()), 'Projection vitals were not readable');
+    assertForgeValue(14.2, getForgeVitalsHistory()[0]['body_fat_pct'], 'Pre-smoothing export lost the caliper reading');
+
+    // Exports with smoothed_bf_pct prefer it, falling back to caliper where Forge left it NULL
+    $fixture = new PDO('sqlite:' . $path);
+    $fixture->exec("ALTER TABLE body_measurements ADD COLUMN smoothed_bf_pct REAL;
+        UPDATE body_measurements SET smoothed_bf_pct = 15.1;
+        INSERT INTO body_measurements VALUES ('2026-09-06 07:00:00', NULL, 14.8);
+        INSERT INTO body_measurements VALUES ('2026-09-07 07:00:00', 13.9, NULL);");
+    unset($fixture);
+    touch($path);
+    $bodyFat = array_column(array_filter(getForgeVitalsHistory(), fn($v) => $v['body_fat_pct'] !== null), 'body_fat_pct');
+    assertForgeValue([15.1, 14.8, 13.9], $bodyFat, 'Smoothed body fat was not preferred over caliper');
     assertForgeValue(1, count(getForgeWorkoutHistory()), 'Projection workout was not readable');
     assertForgeValue('cut', getForgeActiveEnergyRegime()['label'] ?? null, 'Active cycle was not readable');
     assertForgeValue('cut', getForgeEnergyRegimeForDay('2026-09-05'), 'Historical cycle lookup failed');
