@@ -10,6 +10,8 @@ SPENCE is a single-user PHP/SQLite kitchen inventory, recipe, and nutritional lo
 
 No build step. Serve the directory root with PHP-FPM 8.2+ via Nginx/Apache.
 
+**Local dev:** `devserve up spence` serves this working tree at `http://127.0.0.1:8700/spence/` (access key `dev`) against the gitignored `database/spence.db` snapshot, with scanning and the live Ingredients list disabled. See `~/src/devserve/README.md`.
+
 **Database init:**
 ```bash
 cp database/spence_empty.db database/spence.db
