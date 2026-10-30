@@ -125,13 +125,6 @@ try {
            ->execute([$userId, $_POST['goal_type'] ?? 'Custom', $targetKj, (float)$_POST['p'], (float)$_POST['f'], (float)$_POST['c'], $weeklyBudget / 7, $regime, $maintenanceKj, $adjustment, $trainingAdjustment, $maintenanceSource, date('Y-m-d')]);
         $db->commit();
         echo json_encode(['status' => 'success']);
-
-    } elseif ($action === 'delete_product') {
-        $id = (int)$_POST['id'];
-        // Check if in use in inventory or log first? 
-        // For now, industrial delete: nuke from products table
-        $db->prepare("DELETE FROM products WHERE id = ?")->execute([$id]);
-        echo json_encode(['status' => 'success']);
     }
 } catch (Exception $e) {
     if ($db->inTransaction()) $db->rollBack();

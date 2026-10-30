@@ -59,15 +59,6 @@ try {
         $stmt->execute([$id]);
         echo json_encode(['status' => 'success']);
 
-    } elseif ($action === 'delete_product') {
-        $db->beginTransaction();
-        // Delete inventory for this product first
-        $db->prepare("DELETE FROM inventory WHERE product_id = ?")->execute([$id]);
-        // Delete the product itself
-        $db->prepare("DELETE FROM products WHERE id = ?")->execute([$id]);
-        $db->commit();
-        echo json_encode(['status' => 'success']);
-
     } elseif ($action === 'drop_product') {
         $db->beginTransaction();
         // Delete inventory for this product first (user usually wants to clear it if they drop it)
