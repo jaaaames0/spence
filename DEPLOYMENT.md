@@ -84,7 +84,8 @@ Ingredients list, and share the NanoGPT key (their scans bill to it). The login
 form tries every key, so each key must be unique; a guest key equal to the
 primary's logs in as the primary.
 
-Adding a guest is an operator change, not a fast-lane deploy: the pool needs
+The first guest, and the pool/AppArmor change, go through the kit
+`~/optiplex/changes/2026-10-30-spence-guest-tenants`. Adding a guest is an operator change, not a fast-lane deploy: the pool needs
 `SPENCE_TENANTS_DIR` / `SPENCE_TENANT_DATA_DIR` and the AppArmor hat the
 tenant paths (both in `ops/`), and the tenant databases need backing up.
 
