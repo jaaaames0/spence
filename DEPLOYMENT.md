@@ -73,3 +73,34 @@ answering. A new top-level runtime directory must be added to that allowlist.
 Use the full procedure (checkpoint, timed rollback, operator acceptance) for
 changes to the PHP-FPM pool, AppArmor hat, credentials, nginx, or a schema
 change the previous release cannot read.
+
+## Guest tenants
+
+The original install is the primary tenant: `/var/lib/spence/spence.db`,
+`/etc/spence/access-key`, Forge and the Ingredients list, unchanged. Each guest
+is a key file `/etc/spence/tenants/<id>.key` with its own database and uploads
+under `/var/lib/spence/tenants/<id>/`. Guests never read Forge or write the
+Ingredients list, and share the NanoGPT key (their scans bill to it). The login
+form tries every key, so each key must be unique; a guest key equal to the
+primary's logs in as the primary.
+
+Adding a guest is an operator change, not a fast-lane deploy: the pool needs
+`SPENCE_TENANTS_DIR` / `SPENCE_TENANT_DATA_DIR` and the AppArmor hat the
+tenant paths (both in `ops/`), and the tenant databases need backing up.
+
+```bash
+# from the source checkout; seeds from a snapshot of the live catalogue
+sudo -u spence-web sqlite3 /var/lib/spence/spence.db ".backup /var/lib/spence/tmp/seed.db"
+sudo SPENCE_TENANT_DATA_DIR=/var/lib/spence/tenants LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu \
+  php ops/spence-create-tenant.php <id> --seed-from /var/lib/spence/tmp/seed.db
+sudo chown -R spence-web:spence-web /var/lib/spence/tenants
+sudo rm /var/lib/spence/tmp/seed.db
+
+sudo install -d -o root -g spence-web -m 0750 /etc/spence/tenants
+openssl rand -base64 18 | sudo install -o root -g spence-web -m 0640 /dev/stdin /etc/spence/tenants/<id>.key
+```
+
+The seed copies raw, live products (macros, units, last unit cost; `--no-prices`
+zeroes the cost) with their receipt aliases, spice aliases and dismissed dedupe
+pairs. Nothing personal is copied. Revoke a guest by deleting the key file;
+rotating it logs out only that guest's devices.

@@ -11,6 +11,8 @@ profile spence {
 
   /etc/spence/access-key r,
   /etc/spence/nanogpt-key r,
+  /etc/spence/tenants/ r,
+  /etc/spence/tenants/*.key r,
 
   /run/php/php8.3-spence-fpm.sock rw,
   @{PROC}/@{pid}/attr/{apparmor/,}current r,
@@ -24,6 +26,14 @@ profile spence {
   /var/lib/spence/tmp/** rwk,
   /var/lib/spence/sessions/ rw,
   /var/lib/spence/sessions/sess_* rwk,
+
+  # Guest tenants (ops/spence-create-tenant.php): one database and uploads tree each.
+  /var/lib/spence/tenants/ r,
+  /var/lib/spence/tenants/*/ r,
+  /var/lib/spence/tenants/*/spence.db rwk,
+  /var/lib/spence/tenants/*/spence.db-{journal,wal,shm} rwk,
+  /var/lib/spence/tenants/*/uploads/ rw,
+  /var/lib/spence/tenants/*/uploads/** rwk,
 
   /var/lib/forge/ r,
   /var/lib/forge/exports/ r,

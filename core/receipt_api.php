@@ -41,7 +41,7 @@ try {
     }
 
     // Save file for audit trail (same as upload.php)
-    $uploadDir = rtrim(getenv('SPENCE_UPLOAD_DIR') ?: __DIR__ . '/../uploads', '/') . '/';
+    $uploadDir = spenceUploadDir();
     $filename  = bin2hex(random_bytes(8)) . '.' . $allowed[$detected];
     $targetPath = $uploadDir . $filename;
     if (!move_uploaded_file($file['tmp_name'], $targetPath)) {

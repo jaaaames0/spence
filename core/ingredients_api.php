@@ -8,6 +8,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     die(json_encode(['status' => 'error', 'message' => 'Invalid request']));
 }
 
+if (!spenceIngredientsEnabled()) {
+    die(json_encode(['status' => 'error', 'message' => 'The shopping list is not available']));
+}
+
 $action = $_POST['action'] ?? '';
 
 if ($action === 'sync_ingredients') {

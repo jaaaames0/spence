@@ -22,6 +22,8 @@ chmod 666 database/spence.db
 
 **Credentials** are read from files by `spenceReadCredential()` (`core/runtime_config.php`): the access key from `SPENCE_CREDENTIAL_FILE` (default `/srv/secrets/spence_credentials.env`, production `/etc/spence/access-key`) and the NanoGPT key from `NANOGPT_CREDENTIAL_FILE`. The `SPENCE_ACCESS_KEY` / `NANOGPT_API_KEY` env vars are a local-development fallback only. See `DEPLOYMENT.md`.
 
+**Tenancy**: the original install is the primary tenant; guests are key files in `SPENCE_TENANTS_DIR` with their own DB and uploads under `SPENCE_TENANT_DATA_DIR/<id>/`. `auth.php` resolves the tenant from the cookie (`<id>.<hmac>` for guests, the original token for the primary) and `spenceTenant()` (`core/runtime_config.php`) supplies its paths to `get_db_connection()` and `spenceUploadDir()`. Guests never get Forge (`getForgeDbConnection()` returns null) or the Ingredients list. Provision with `ops/spence-create-tenant.php`, which seeds the raw product catalogue; see `DEPLOYMENT.md`.
+
 **Timezone** is hardcoded to `Australia/Sydney` in `core/db_helper.php`.
 
 ## Architecture

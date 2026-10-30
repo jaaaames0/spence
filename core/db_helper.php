@@ -2,6 +2,7 @@
 /**
  * Database Helper using PDO (requires php-sqlite3)
  */
+require_once __DIR__ . '/runtime_config.php';
 
 // Global Timezone Protocol (GTP v1.0)
 date_default_timezone_set('Australia/Sydney');
@@ -24,7 +25,7 @@ function applyDatabaseMigration(PDO $db, string $version, callable $migration): 
 }
 
 function get_db_connection(?string $dbPath = null): PDO {
-    $dbPath ??= getenv('SPENCE_DB_PATH') ?: __DIR__ . '/../database/spence.db';
+    $dbPath ??= spenceTenant()['db_path'];
     $db = new PDO('sqlite:' . $dbPath);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->exec('PRAGMA busy_timeout = 5000;');

@@ -254,6 +254,7 @@ include '../core/page_head.php';
         </div>
     </div>
 
+    <?php if ($has_profile): // The plan modal and its controls need a profile's active plan ?>
     <!-- Active Energy Plan Modal -->
     <div class="modal fade" id="overrideModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -281,6 +282,7 @@ include '../core/page_head.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- Weigh In Modal -->
     <div class="modal fade" id="weighInModal" tabindex="-1">
@@ -422,6 +424,7 @@ include '../core/page_head.php';
             });
         }
 
+<?php if ($has_profile): ?>
         function applyPlanRegime(mode) {
             const adjustments = { 'Fat Loss': -2000, Maintenance: 0, 'Lean Gain': 1000, 'High Gain': 2500, 'Dirty Bulk': 4500 };
             document.getElementById('goalModeSelect').value = mode;
@@ -462,6 +465,7 @@ include '../core/page_head.php';
             recalcPlanMacros();
         }
         document.addEventListener('DOMContentLoaded', initialisePlanControls);
+<?php endif; ?>
 
         function submitInit(e) {
             e.preventDefault();

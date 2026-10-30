@@ -5,6 +5,7 @@
  * Production consumes a versioned, atomically published projection rather than
  * Forge's live WAL database. Set FORGE_DB_PATH to override the projection path.
  */
+require_once __DIR__ . '/runtime_config.php';
 
 const FORGE_EXPORT_SCHEMA_VERSION = 1;
 const FORGE_EXPORT_MAX_AGE_SECONDS = 300;
@@ -33,6 +34,8 @@ function getForgeExportPath(): array {
 }
 
 function getForgeDbConnection(): ?PDO {
+    // Forge holds the primary user's body and training data; guests never read it.
+    if (!spenceTenant()['primary']) return null;
     $resolved = getForgeExportPath();
     $dbPath = $resolved['path'];
     if (!is_string($dbPath) || $dbPath === '' || $dbPath[0] !== '/' || strpbrk($dbPath, "?#\0") !== false) {

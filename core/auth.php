@@ -21,7 +21,6 @@ if ($ACCESS_KEY === '') {
     exit('Spence authentication is unavailable.');
 }
 
-$AUTH_TOKEN  = hash_hmac('sha256', 'spence_auth_v1', $ACCESS_KEY);
 $COOKIE_NAME = 'spence_auth';
 $COOKIE_TTL  = 365 * 24 * 3600; // 1 year
 
@@ -33,17 +32,39 @@ if (isset($_GET['logout'])) {
     exit;
 }
 
-$authenticated = isset($_COOKIE[$COOKIE_NAME])
-    && is_string($_COOKIE[$COOKIE_NAME])
-    && hash_equals($AUTH_TOKEN, $_COOKIE[$COOKIE_NAME]);
+$tenantKeys = [SPENCE_PRIMARY_TENANT => $ACCESS_KEY] + spenceGuestTenantKeys();
 
-if (!$authenticated) {
-    if (isset($_POST['access_key']) && is_string($_POST['access_key']) && hash_equals($ACCESS_KEY, $_POST['access_key'])) {
+// Guest cookies carry their tenant id ("id.hmac"); the primary token has no prefix.
+$tenantId = null;
+$cookie = $_COOKIE[$COOKIE_NAME] ?? null;
+if (is_string($cookie)) {
+    $claimed = str_contains($cookie, '.') ? strstr($cookie, '.', true) : SPENCE_PRIMARY_TENANT;
+    if (isset($tenantKeys[$claimed]) && hash_equals(spenceAuthToken($claimed, $tenantKeys[$claimed]), $cookie)) {
+        $tenantId = $claimed;
+    }
+}
+
+if ($tenantId === null && isset($_POST['access_key']) && is_string($_POST['access_key'])) {
+    foreach ($tenantKeys as $id => $key) {
+        if (!hash_equals($key, $_POST['access_key'])) continue;
         setcookie($COOKIE_NAME, '', spenceAuthCookieOptions(time() - 3600, '/'));
-        setcookie($COOKIE_NAME, $AUTH_TOKEN, spenceAuthCookieOptions(time() + $COOKIE_TTL));
+        setcookie($COOKIE_NAME, spenceAuthToken($id, $key), spenceAuthCookieOptions(time() + $COOKIE_TTL));
         header("Location: " . $_SERVER['PHP_SELF']);
         exit;
     }
+}
+
+$authenticated = $tenantId !== null;
+if ($authenticated) {
+    $tenant = spenceTenant($tenantId);
+    // Guests are provisioned by ops/spence-create-tenant.php; never create an empty database here.
+    if (!$tenant['primary'] && !is_file($tenant['db_path'])) {
+        http_response_code(503);
+        exit('This Spence account has not been set up yet.');
+    }
+}
+
+if (!$authenticated) {
     ?>
     <!DOCTYPE html>
     <html lang="en">
