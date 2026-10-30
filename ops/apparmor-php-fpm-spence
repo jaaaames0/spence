@@ -13,6 +13,7 @@ profile spence {
   /etc/spence/nanogpt-key r,
   /etc/spence/tenants/ r,
   /etc/spence/tenants/*.key r,
+  /etc/spence/tenants/*.nanogpt r,
 
   /run/php/php8.3-spence-fpm.sock rw,
   @{PROC}/@{pid}/attr/{apparmor/,}current r,

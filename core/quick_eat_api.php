@@ -12,17 +12,13 @@ header('Content-Type: application/json');
 
 set_time_limit(120);
 
-$api_key = spenceReadCredential(
-    'NANOGPT_CREDENTIAL_FILE',
-    '/srv/secrets/nanogpt.env',
-    'NANOGPT_API_KEY'
-);
+$api_key = spenceNanoGptKey();
 
 $action = $_POST['action'] ?? '';
 
 try {
     if ($action === 'scan') {
-        if (!$api_key) throw new Exception("NanoGPT API key not configured.");
+        if (!$api_key) throw new Exception(spenceNanoGptMissingMessage());
         if (!isset($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
             throw new Exception("No image received.");
         }

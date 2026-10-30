@@ -32,6 +32,9 @@ try {
     assertTenant(true, spenceTenant()['primary'], 'default tenant is primary');
     assertTenant("$root/primary.db", spenceTenant()['db_path'], 'primary keeps SPENCE_DB_PATH');
     assertTenant(true, spenceIngredientsEnabled(), 'primary keeps the Ingredients list');
+    file_put_contents("$root/nanogpt-primary", "primary-ai-key\n");
+    putenv("NANOGPT_CREDENTIAL_FILE=$root/nanogpt-primary");
+    assertTenant('primary-ai-key', spenceNanoGptKey(), 'primary uses the shared NanoGPT key');
     assertTenant(hash_hmac('sha256', 'spence_auth_v1', 'k'), spenceAuthToken(SPENCE_PRIMARY_TENANT, 'k'), 'primary cookie is unchanged');
 
     $guest = spenceTenant('brother');
@@ -39,6 +42,10 @@ try {
     assertTenant("$root/data/brother/uploads/", spenceUploadDir(), 'guest upload directory');
     assertTenant(false, spenceIngredientsEnabled(), 'guests never get the Ingredients list');
     assertTenant(null, getForgeDbConnection(), 'guests never read Forge');
+    assertTenant('', spenceNanoGptKey(), 'a guest without its own key never uses the primary key');
+    file_put_contents("$root/keys/brother.nanogpt", "brother-ai-key\n");
+    assertTenant('brother-ai-key', spenceNanoGptKey(), 'a guest uses its own NanoGPT key');
+    assertTenant(['brother' => 'brother-key'], spenceGuestTenantKeys(), 'a NanoGPT key file is not a tenant');
     assertTenant([], getForgeVitalsHistory(), 'guests get no Forge vitals');
     assertTenant(true, str_starts_with(spenceAuthToken('brother', 'k'), 'brother.'), 'guest cookie names its tenant');
     assertTenant(false, spenceAuthToken('brother', 'k') === spenceAuthToken('other', 'k'), 'guest cookies are tenant-bound');
@@ -50,6 +57,6 @@ try {
 
     echo "tenancy tests passed\n";
 } finally {
-    foreach (['SPENCE_TENANTS_DIR', 'SPENCE_TENANT_DATA_DIR', 'SPENCE_DB_PATH', 'SPENCE_INGREDIENTS_PATH', 'FORGE_DB_PATH'] as $name) putenv($name);
+    foreach (['SPENCE_TENANTS_DIR', 'SPENCE_TENANT_DATA_DIR', 'SPENCE_DB_PATH', 'SPENCE_INGREDIENTS_PATH', 'FORGE_DB_PATH', 'NANOGPT_CREDENTIAL_FILE'] as $name) putenv($name);
     exec('rm -rf ' . escapeshellarg($root));
 }

@@ -80,7 +80,10 @@ The original install is the primary tenant: `/var/lib/spence/spence.db`,
 `/etc/spence/access-key`, Forge and the Ingredients list, unchanged. Each guest
 is a key file `/etc/spence/tenants/<id>.key` with its own database and uploads
 under `/var/lib/spence/tenants/<id>/`. Guests never read Forge or write the
-Ingredients list, and share the NanoGPT key (their scans bill to it). The login
+Ingredients list. Each guest scans with its own NanoGPT key,
+`/etc/spence/tenants/<id>.nanogpt` (`0640 root:spence-web`), so spend and
+per-key limits are separate. Without that file the guest's scanning is off;
+it never falls back to the primary key. The login
 form tries every key, so each key must be unique; a guest key equal to the
 primary's logs in as the primary.
 

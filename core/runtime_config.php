@@ -114,6 +114,26 @@ function spenceUploadDir(): string {
     return spenceTenant()['upload_dir'];
 }
 
+/**
+ * NanoGPT key for the current tenant. Guests use their own <id>.nanogpt file (own
+ * spend and limits) and never fall back to the primary's key; '' disables scanning.
+ */
+function spenceNanoGptKey(): string {
+    $tenant = spenceTenant();
+    if ($tenant['primary']) {
+        return spenceReadCredential('NANOGPT_CREDENTIAL_FILE', '/srv/secrets/nanogpt.env', 'NANOGPT_API_KEY');
+    }
+    $file = spenceTenantKeyDir() . '/' . $tenant['id'] . '.nanogpt';
+    return is_file($file) && is_readable($file) ? trim((string)file_get_contents($file)) : '';
+}
+
+/** Why scanning is unavailable, worded for whoever is signed in. */
+function spenceNanoGptMissingMessage(): string {
+    return spenceTenant()['primary']
+        ? 'NanoGPT API key not configured.'
+        : 'Photo and receipt scanning is not set up for this account yet.';
+}
+
 /** Auth cookie value: the primary keeps its original token so existing sessions survive. */
 function spenceAuthToken(string $tenantId, string $key): string {
     if ($tenantId === SPENCE_PRIMARY_TENANT) return hash_hmac('sha256', 'spence_auth_v1', $key);

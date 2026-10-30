@@ -14,18 +14,14 @@ header('Content-Type: application/json');
 
 set_time_limit(120); // Vision calls can take up to 60s on a busy receipt
 
-$api_key = spenceReadCredential(
-    'NANOGPT_CREDENTIAL_FILE',
-    '/srv/secrets/nanogpt.env',
-    'NANOGPT_API_KEY'
-);
+$api_key = spenceNanoGptKey();
 
 try {
     if (($_POST['action'] ?? '') !== 'scan_receipt') {
         throw new Exception("Unknown action.");
     }
 
-    if (!$api_key) throw new Exception("NanoGPT API key not configured.");
+    if (!$api_key) throw new Exception(spenceNanoGptMissingMessage());
 
     if (!isset($_FILES['receipt']) || $_FILES['receipt']['error'] !== UPLOAD_ERR_OK) {
         throw new Exception(uploadErrorMessage($_FILES['receipt']['error'] ?? null));
