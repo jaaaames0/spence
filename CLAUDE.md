@@ -22,7 +22,7 @@ chmod 666 database/spence.db
 
 **Credentials** are read from files by `spenceReadCredential()` (`core/runtime_config.php`): the access key from `SPENCE_CREDENTIAL_FILE` (default `/srv/secrets/spence_credentials.env`, production `/etc/spence/access-key`) and the NanoGPT key from `NANOGPT_CREDENTIAL_FILE`. The `SPENCE_ACCESS_KEY` / `NANOGPT_API_KEY` env vars are a local-development fallback only. See `DEPLOYMENT.md`.
 
-**Timezone** is hardcoded to `Australia/Sydney` in `core/db_helper.php`.
+**Timezone** is hardcoded to `Australia/Sydney` in `core/db_helper.php`. Timestamps are stored in UTC and the offset changes with DST, so never apply a fixed offset: filter a local day or range with `col >= ? AND col < ?` and `spenceLocalDayBounds()`, and group or display per row with the SQL functions `spence_local_date()` / `spence_local_datetime()` registered by `get_db_connection()`.
 
 ## Architecture
 

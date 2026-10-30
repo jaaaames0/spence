@@ -45,7 +45,21 @@ try {
     assertSameValue(2.5, $result['quantity'], 'Wrong quantity deducted across lots');
     assertSameValue(35.0, $result['cost'], 'Wrong cost deducted across lots');
 
-    $milkExpiry = resolveReceiptExpiry(['product' => 'Full Cream Milk', 'category' => 'Dairy', 'location' => 'Fridge', 'expiry_kind' => 'estimated', 'estimated_shelf_life_days' => 7]);
+    // Local days follow each timestamp's own offset: 13:30 UTC is 23:30 AEST in July, not 00:30 next day
+    assertSameValue(['2026-06-30 14:00:00', '2026-07-01 14:00:00'], spenceLocalDayBounds('2026-07-01'), 'Winter local day bounds used the wrong offset');
+    assertSameValue(['2026-10-03 14:00:00', '2026-10-04 13:00:00'], spenceLocalDayBounds('2026-10-04'), 'DST start day should be 23 hours long');
+    assertSameValue(['2026-04-04 13:00:00', '2026-04-05 14:00:00'], spenceLocalDayBounds('2026-04-05'), 'DST end day should be 25 hours long');
+    assertSameValue(['2026-06-30 14:00:00', '2026-10-29 13:00:00'], spenceLocalDayBounds('2026-07-01', '2026-10-29'), 'Range bounds should span both offsets');
+    assertSameValue('2026-07-01 23:30:00', spenceLocalDateTime('2026-07-01 13:30:00'), 'Winter timestamp displayed with the summer offset');
+    assertSameValue('2026-07-01', $db->query("SELECT spence_local_date('2026-07-01 13:30:00')")->fetchColumn(), 'SQL local date used the current offset');
+    assertSameValue('2026-11-02 00:30:00', $db->query("SELECT spence_local_datetime('2026-11-01 13:30:00')")->fetchColumn(), 'SQL local datetime ignored DST');
+    $db->exec('ALTER TABLE consumption_log ADD COLUMN amount REAL');
+    $db->exec('ALTER TABLE consumption_log ADD COLUMN unit_cost REAL');
+    $db->exec("INSERT INTO waste_log (product_id, qty, unit, value, wasted_at) VALUES (2, 1, 'ea', 4, '2026-07-01 13:30:00')");
+    assertSameValue(4.0, getWasteSummary($db, '2026-07-01', '2026-07-01')['wasted'], 'Late-night winter waste landed on the next day');
+    assertSameValue(0.0, getWasteSummary($db, '2026-07-02', '2026-07-02')['wasted'], 'Late-night winter waste counted on the next day');
+
+    $milkExpiry =resolveReceiptExpiry(['product' => 'Full Cream Milk', 'category' => 'Dairy', 'location' => 'Fridge', 'expiry_kind' => 'estimated', 'estimated_shelf_life_days' => 7]);
     assertSameValue('estimated', $milkExpiry['source'], 'Perishable expiry estimate was rejected');
     $coffeeExpiry = resolveReceiptExpiry(['product' => 'Coffee Blend 43', 'category' => 'Drinks', 'location' => 'Pantry', 'expiry_kind' => 'estimated', 'estimated_shelf_life_days' => 7]);
     assertSameValue(null, $coffeeExpiry['date'], 'Shelf-stable product received an expiry date');

@@ -7,15 +7,14 @@ require_once 'core/db_helper.php';
 require_once 'core/food_sources.php';
 $db = get_db_connection();
 
-$tz    = SPENCE_TIMEZONE_OFFSET;
 $today = date('Y-m-d');
 
 // ── Today's intake ────────────────────────────────────────────────────────────
 $stmt = $db->prepare("
     SELECT SUM(kj) as kj, SUM(protein) as protein
     FROM consumption_log
-    WHERE date(consumed_at, '$tz') = ?");
-$stmt->execute([$today]);
+    WHERE consumed_at >= ? AND consumed_at < ?");
+$stmt->execute(spenceLocalDayBounds($today));
 $today_stats   = $stmt->fetch(PDO::FETCH_ASSOC);
 $today_kj      = (int)($today_stats['kj'] ?? 0);
 $today_protein = (int)round($today_stats['protein'] ?? 0);   // 0 sig figs, precision not needed here
@@ -49,11 +48,11 @@ $waste_30d     = getWasteSummary($db, date('Y-m-d', strtotime('-29 days')), $tod
 
 // ── 7-day kJ trend ────────────────────────────────────────────────────────────
 $stmt = $db->prepare("
-    SELECT date(consumed_at, '$tz') as day, ROUND(SUM(kj)) as total_kj
+    SELECT spence_local_date(consumed_at) as day, ROUND(SUM(kj)) as total_kj
     FROM consumption_log
-    WHERE consumed_at >= datetime('now', '-6 days')
+    WHERE consumed_at >= ? AND consumed_at < ?
     GROUP BY day ORDER BY day ASC");
-$stmt->execute();
+$stmt->execute(spenceLocalDayBounds(date('Y-m-d', strtotime('-6 days')), $today));
 $trend_rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $trend_data = $trend_labels = [];
@@ -87,11 +86,13 @@ foreach (array_keys($source_periods) as $period) {
 }
 
 // ── Short-life inventory approaching expiry ─────────────────────────────────
-$stmt = $db->query("SELECT p.name, i.expiry_date, i.expiry_source,
-    CAST(julianday(i.expiry_date) - julianday('now', 'localtime') AS INTEGER) AS days_remaining
+// expiry_date is a local calendar day, so compare it with today's local date rather than SQLite's UTC 'now'
+$stmt = $db->prepare("SELECT p.name, i.expiry_date, i.expiry_source,
+    CAST(julianday(i.expiry_date) - julianday(:today) AS INTEGER) AS days_remaining
     FROM inventory i JOIN products p ON p.id = i.product_id
-    WHERE i.current_qty > 0 AND i.expiry_date IS NOT NULL AND i.expiry_date <= date('now', '+3 days')
+    WHERE i.current_qty > 0 AND i.expiry_date IS NOT NULL AND i.expiry_date <= date(:today, '+3 days')
     ORDER BY i.expiry_date ASC, p.name ASC LIMIT 4");
+$stmt->execute(['today' => $today]);
 $expiring_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Page setup ────────────────────────────────────────────────────────────────

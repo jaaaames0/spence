@@ -25,14 +25,14 @@ $next_week_date = date('Y-m-d', strtotime($current_date . ' + 7 days'));
 // 1. Fetch Localized Aggregates
 $stmt = $db->prepare("
     SELECT 
-        DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') as log_date,
+        spence_local_date(consumed_at) as log_date,
         SUM(kj) as day_kj, SUM(protein) as day_p, SUM(fat) as day_f, SUM(carb) as day_c,
         SUM(cl.amount * cl.unit_cost) as day_cost
     FROM consumption_log cl
-    WHERE DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') BETWEEN ? AND ?
+    WHERE consumed_at >= ? AND consumed_at < ?
     GROUP BY log_date
     ORDER BY log_date ASC");
-$stmt->execute([$start_date, $end_date]);
+$stmt->execute(spenceLocalDayBounds($start_date, $end_date));
 $raw_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // 2. Fill Time Gaps

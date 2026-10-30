@@ -5,7 +5,48 @@
 
 // Global Timezone Protocol (GTP v1.0)
 date_default_timezone_set('Australia/Sydney');
-define('SPENCE_TIMEZONE_OFFSET', sprintf('%+d hours', (int)(date('Z') / 3600))); // Derived from system tz, handles AEDT/AEST DST
+
+/*
+ * Timestamps are stored in UTC (CURRENT_TIMESTAMP). Sydney's offset is +10 or +11 depending on DST,
+ * so each value is converted on its own date: never apply today's offset to history.
+ */
+
+/** Local 'Y-m-d H:i:s' for a stored UTC timestamp. */
+function spenceLocalDateTime(?string $utc): ?string {
+    if ($utc === null || $utc === '') return null;
+    try {
+        $time = new DateTimeImmutable($utc, new DateTimeZone('UTC'));
+    } catch (Exception $e) {
+        return null;
+    }
+    return $time->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d H:i:s');
+}
+
+/**
+ * UTC bounds [start, end) covering local days $fromDay..$toDay, for `col >= ? AND col < ?`
+ * against stored UTC timestamps (which also lets the column's index be used).
+ */
+function spenceLocalDayBounds(string $fromDay, ?string $toDay = null): array {
+    $local = new DateTimeZone(date_default_timezone_get());
+    $utc = new DateTimeZone('UTC');
+    $start = DateTimeImmutable::createFromFormat('!Y-m-d', $fromDay, $local);
+    $end = DateTimeImmutable::createFromFormat('!Y-m-d', $toDay ?? $fromDay, $local);
+    if (!$start || !$end) throw new InvalidArgumentException('Expected Y-m-d local days');
+    return [
+        $start->setTimezone($utc)->format('Y-m-d H:i:s'),
+        $end->modify('+1 day')->setTimezone($utc)->format('Y-m-d H:i:s'),
+    ];
+}
+
+/** SQL helpers for per-row conversion: spence_local_date(col), spence_local_datetime(col). */
+function registerSpenceSqlFunctions(PDO $db): void {
+    $flags = defined('PDO::SQLITE_DETERMINISTIC') ? PDO::SQLITE_DETERMINISTIC : 0;
+    $db->sqliteCreateFunction('spence_local_datetime', fn($utc) => spenceLocalDateTime($utc === null ? null : (string)$utc), 1, $flags);
+    $db->sqliteCreateFunction('spence_local_date', function ($utc) {
+        $local = spenceLocalDateTime($utc === null ? null : (string)$utc);
+        return $local === null ? null : substr($local, 0, 10);
+    }, 1, $flags);
+}
 
 function applyDatabaseMigration(PDO $db, string $version, callable $migration): void {
     $stmt = $db->prepare('SELECT 1 FROM schema_migrations WHERE version = ?');
@@ -30,6 +71,7 @@ function get_db_connection(?string $dbPath = null): PDO {
     $db->exec('PRAGMA busy_timeout = 5000;');
     $db->exec('PRAGMA journal_mode=WAL;');
     $db->exec('PRAGMA foreign_keys = ON;');
+    registerSpenceSqlFunctions($db);
     $db->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
         version TEXT PRIMARY KEY,
         applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -223,15 +265,15 @@ function recordWaste(PDO $db, int $productId, float $qty, string $unit, float $v
  * (consumed + wasted) rather than purchases, which land in lumps and would swing a weekly ratio.
  */
 function getWasteSummary(PDO $db, string $startDate, string $endDate): array {
-    $tz = SPENCE_TIMEZONE_OFFSET;
-    $sum = function (string $sql) use ($db, $startDate, $endDate): float {
+    $bounds = spenceLocalDayBounds($startDate, $endDate);
+    $sum = function (string $sql) use ($db, $bounds): float {
         $stmt = $db->prepare($sql);
-        $stmt->execute([$startDate, $endDate]);
+        $stmt->execute($bounds);
         return (float)($stmt->fetchColumn() ?: 0);
     };
-    $consumed = $sum("SELECT SUM(amount * unit_cost) FROM consumption_log WHERE DATE(consumed_at, '$tz') BETWEEN ? AND ?");
-    $wasted = $sum("SELECT SUM(value) FROM waste_log WHERE DATE(wasted_at, '$tz') BETWEEN ? AND ?");
-    $spent = $sum("SELECT SUM(price) FROM purchase_log WHERE DATE(purchased_at, '$tz') BETWEEN ? AND ?");
+    $consumed = $sum("SELECT SUM(amount * unit_cost) FROM consumption_log WHERE consumed_at >= ? AND consumed_at < ?");
+    $wasted = $sum("SELECT SUM(value) FROM waste_log WHERE wasted_at >= ? AND wasted_at < ?");
+    $spent = $sum("SELECT SUM(price) FROM purchase_log WHERE purchased_at >= ? AND purchased_at < ?");
     $used = $consumed + $wasted;
     return [
         'consumed' => $consumed,

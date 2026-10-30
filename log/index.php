@@ -10,6 +10,8 @@ $db = get_db_connection();
 // --- Time-Travel ---
 $today_str = date('Y-m-d');
 $current_date = $_GET['date'] ?? $today_str;
+if (!DateTime::createFromFormat('!Y-m-d', $current_date)) $current_date = $today_str;
+$day_bounds = spenceLocalDayBounds($current_date);
 $prev_date = date('Y-m-d', strtotime($current_date . ' -1 day'));
 $next_date = date('Y-m-d', strtotime($current_date . ' +1 day'));
 
@@ -17,29 +19,29 @@ $next_date = date('Y-m-d', strtotime($current_date . ' +1 day'));
 $stmt = $db->prepare("
     SELECT SUM(kj) as total_kj, SUM(protein) as total_p, SUM(fat) as total_f, SUM(carb) as total_c, COUNT(*) as entries
     FROM consumption_log 
-    WHERE DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') = ?");
-$stmt->execute([$current_date]);
+    WHERE consumed_at >= ? AND consumed_at < ?");
+$stmt->execute($day_bounds);
 $daily = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // 2. Today's Cost
 $stmt = $db->prepare("
     SELECT SUM(cl.amount * cl.unit_cost) as total_cost
     FROM consumption_log cl
-    WHERE DATE(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') = ?");
-$stmt->execute([$current_date]);
+    WHERE cl.consumed_at >= ? AND cl.consumed_at < ?");
+$stmt->execute($day_bounds);
 $daily_cost = $stmt->fetchColumn() ?: 0;
 
 // 3. Averages
 $stmt = $db->prepare("
     SELECT AVG(day_kj) as avg_kj, AVG(day_p) as avg_p, AVG(day_f) as avg_f, AVG(day_c) as avg_c, AVG(day_cost) as avg_cost
     FROM (
-        SELECT DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') as d, SUM(kj) as day_kj, SUM(protein) as day_p, SUM(fat) as day_f, SUM(carb) as day_c,
+        SELECT spence_local_date(consumed_at) as d, SUM(kj) as day_kj, SUM(protein) as day_p, SUM(fat) as day_f, SUM(carb) as day_c,
                SUM(amount * unit_cost) as day_cost
         FROM consumption_log 
-        WHERE DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') BETWEEN date(?, '-6 days') AND ?
+        WHERE consumed_at >= ? AND consumed_at < ?
         GROUP BY d
     )");
-$stmt->execute([$current_date, $current_date]);
+$stmt->execute(spenceLocalDayBounds(date('Y-m-d', strtotime($current_date . ' -6 days')), $current_date));
 $averages = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // 4. Goal Fetching
@@ -74,15 +76,15 @@ $stmt = $db->prepare("
     SELECT cl.*,
            COALESCE(p_parent.name, p.name, cl.name, '—') as product_name,
            p.last_unit_cost, p.recipe_id, r.yield_serves, r.is_active as recipe_active,
-           DATETIME(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') as local_consumed_at
+           spence_local_datetime(cl.consumed_at) as local_consumed_at
     FROM consumption_log cl
     LEFT JOIN products p ON cl.product_id = p.id
     LEFT JOIN recipes r ON p.recipe_id = r.id
     LEFT JOIN recipes r_parent ON r.parent_recipe_id = r_parent.id
     LEFT JOIN products p_parent ON r_parent.product_id = p_parent.id
-    WHERE DATE(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') = ?
+    WHERE cl.consumed_at >= ? AND cl.consumed_at < ?
     ORDER BY cl.consumed_at ASC");
-$stmt->execute([$current_date]);
+$stmt->execute($day_bounds);
 $log_entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $hasHistorical = false;
