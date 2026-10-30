@@ -98,15 +98,6 @@ try {
         recordPurchase($db, $product_id, $qty, $base_unit, $price, 'manual');
         echo json_encode(['status' => 'success']);
 
-    } elseif ($action === 'check_job') {
-        $checkId = (int)($_POST['job_id'] ?? 0);
-        $stmt = $checkId > 0 ? 
-            $db->prepare("SELECT id, status, message, result_json FROM jobs WHERE id = ?") : 
-            $db->prepare("SELECT id, status, message, result_json FROM jobs WHERE created_at > datetime('now', '-5 minutes') ORDER BY id DESC LIMIT 1");
-        $stmt->execute($checkId > 0 ? [$checkId] : []);
-        $job = $stmt->fetch(PDO::FETCH_ASSOC);
-        echo json_encode($job ?: ['status' => 'none']);
-
     } elseif ($action === 'get_recipe') {
         $stmt = $db->prepare("SELECT r.*, p.name as product_name,
             ROUND((p.kj_per_100 * p.weight_per_ea / 100), 0) as kj_portion,
