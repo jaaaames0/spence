@@ -90,45 +90,10 @@ $log_entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $hasHistorical = false;
 foreach($log_entries as $entry) { if($entry['recipe_active'] === 0) $hasHistorical = true; }
 
-// Detailed Ingredient Fetcher
+// Ingredient breakdown, scaled to the totals captured at log time (see buildLoggedRecipeBreakdown)
 $recipe_breakdowns = [];
 foreach ($log_entries as $entry) {
-    if ($entry['recipe_id']) {
-        $stmt = $db->prepare("
-            SELECT ri.*, p.name as product_name, p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100, p.weight_per_ea
-            FROM recipe_ingredients ri
-            JOIN products p ON ri.product_id = p.id
-            WHERE ri.recipe_id = ?");
-        $stmt->execute([$entry['recipe_id']]);
-        $ingredients = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        $ratio = $entry['amount'] / ($entry['yield_serves'] ?: 1);
-        $breakdown = [];
-        $raw_cost_total = 0;
-        foreach ($ingredients as $ing) {
-            $ing_weight = ($ing['unit'] === 'ea') ? ($ing['amount'] * $ing['weight_per_ea']) : $ing['amount'];
-            $f = ($ing_weight / 0.1) * $ratio;
-            $cost = getUnitCost($db, $ing['product_id']) * $ing['amount'] * $ratio;
-            $raw_cost_total += $cost;
-            $breakdown[] = [
-                'name' => $ing['product_name'],
-                'amount' => $ing['amount'] * $ratio,
-                'unit' => $ing['unit'],
-                'kj' => round($f * $ing['kj_per_100']),
-                'p' => round($f * $ing['protein_per_100'], 1),
-                'f' => round($f * $ing['fat_per_100'], 1),
-                'c' => round($f * $ing['carb_per_100'], 1),
-                'cost' => $cost
-            ];
-        }
-        // Current ingredient prices give the split; scale it to the cost captured at log time so the rows sum to the entry
-        $entry_cost = $entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']);
-        if ($raw_cost_total > 0) {
-            foreach ($breakdown as &$b) $b['cost'] *= $entry_cost / $raw_cost_total;
-            unset($b);
-        }
-        $recipe_breakdowns[$entry['id']] = $breakdown;
-    }
+    if ($entry['recipe_id']) $recipe_breakdowns[$entry['id']] = buildLoggedRecipeBreakdown($db, $entry);
 }
 $page_title   = 'Daily Log';
 $page_context = 'log';

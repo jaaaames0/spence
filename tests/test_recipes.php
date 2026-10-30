@@ -63,6 +63,19 @@ try {
     assertRecipeValue($products, $count('SELECT COUNT(*) FROM products'), 'A refused save must not create products');
     assertRecipeValue([(string)$v4], array_map('strval', $db->query('SELECT id FROM recipes WHERE is_active = 1')->fetchAll(PDO::FETCH_COLUMN)), 'A refused save must not retire the recipe');
 
+    // The log breakdown adds up to what was logged, even after the ingredients' macros change
+    $productId = (int)$db->query("SELECT product_id FROM recipes WHERE id = $v4")->fetchColumn();
+    $db->exec("UPDATE products SET kj_per_100 = 900, protein_per_100 = 25 WHERE id = 1");
+    $entry = ['recipe_id' => $v4, 'amount' => 1, 'unit' => 'ea', 'yield_serves' => 2, 'kj' => 4301, 'protein' => 70.3, 'fat' => 20.0, 'carb' => 0, 'unit_cost' => 3.33, 'last_unit_cost' => 0];
+    $rows = buildLoggedRecipeBreakdown($db, $entry);
+    assertRecipeValue(4301.0, array_sum(array_column($rows, 'kj')), 'Breakdown kJ should sum to the logged kJ');
+    assertRecipeValue(70.3, round(array_sum(array_column($rows, 'p')), 1), 'Breakdown protein should sum to the logged protein');
+    assertRecipeValue(20.0, round(array_sum(array_column($rows, 'f')), 1), 'A nutrient no ingredient carries now should still be split');
+    assertRecipeValue(3.33, round(array_sum(array_column($rows, 'cost')), 2), 'Breakdown cost should sum to the logged cost');
+    assertRecipeValue([0.35, 0.1], array_map(fn($r) => round($r['amount'], 4), $rows), 'Row amounts should be one serve of the recipe');
+    $rows = buildLoggedRecipeBreakdown($db, ['unit' => 'kg', 'amount' => 0.45] + $entry);
+    assertRecipeValue([0.35, 0.1], array_map(fn($r) => round($r['amount'], 4), $rows), 'A weighed entry should scale by the recipe weight, not serves');
+
     echo "Recipe tests passed\n";
 } finally {
     foreach (['', '-wal', '-shm'] as $suffix) @unlink($path . $suffix);

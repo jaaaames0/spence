@@ -461,6 +461,86 @@ function syncRecipeToProduct($db, $recipe_id) {
 }
 
 /**
+ * Split $total across keys in proportion to $shares, rounded to $decimals with the largest
+ * remainders rounded up, so the rounded parts add up to the rounded total exactly.
+ */
+function apportionToTotal(array $shares, float $total, int $decimals = 0): array {
+    if (!$shares) return [];
+    $shares = array_map(fn($share) => max(0.0, (float)$share), $shares);
+    $sum = array_sum($shares);
+    if ($sum <= 0) {
+        $shares = array_fill_keys(array_keys($shares), 1.0);
+        $sum = count($shares);
+    }
+    $scale = 10 ** $decimals;
+    $units = max(0, (int)round($total * $scale));
+    $parts = $remainders = [];
+    foreach ($shares as $key => $share) {
+        $exact = $units * $share / $sum;
+        $parts[$key] = (int)floor($exact);
+        $remainders[$key] = $exact - $parts[$key];
+    }
+    arsort($remainders);
+    foreach (array_slice(array_keys($remainders), 0, $units - array_sum($parts)) as $key) $parts[$key]++;
+    return array_map(fn($part) => round($part / $scale, $decimals), $parts);
+}
+
+/**
+ * Per-ingredient rows for a logged recipe entry that add up to what was logged.
+ *
+ * A recipe version's ingredient amounts never change (an ingredient edit forks a new version, a
+ * substituted cook logs a ghost fork), so each row's amount is historical. Product macros and
+ * prices are current, so they only decide each ingredient's share of the logged kJ, P, F, C and
+ * cost; a nutrient no ingredient now carries is split by weight.
+ * $entry: recipe_id, amount, unit, yield_serves, kj, protein, fat, carb, unit_cost, last_unit_cost.
+ */
+function buildLoggedRecipeBreakdown(PDO $db, array $entry): array {
+    $stmt = $db->prepare("SELECT ri.product_id, ri.amount, ri.unit, p.name AS product_name, p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100, p.weight_per_ea
+        FROM recipe_ingredients ri JOIN products p ON ri.product_id = p.id WHERE ri.recipe_id = ? ORDER BY ri.id");
+    $stmt->execute([$entry['recipe_id']]);
+    $ingredients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$ingredients) return [];
+
+    $weights = array_map(fn($ing) => $ing['unit'] === 'ea' ? (float)$ing['amount'] * (float)$ing['weight_per_ea'] : (float)$ing['amount'], $ingredients);
+    $totalWeight = array_sum($weights);
+    // Serves when logged per portion, otherwise a weight of the whole recipe
+    $ratio = ($entry['unit'] ?? 'ea') === 'ea'
+        ? (float)$entry['amount'] / ((float)$entry['yield_serves'] ?: 1)
+        : ($totalWeight > 0 ? (float)$entry['amount'] / $totalWeight : 0);
+
+    $current = ['kj' => [], 'p' => [], 'f' => [], 'c' => [], 'cost' => []];
+    foreach ($ingredients as $i => $ing) {
+        $factor = $weights[$i] / 0.1;
+        $current['kj'][$i] = $factor * (float)$ing['kj_per_100'];
+        $current['p'][$i] = $factor * (float)$ing['protein_per_100'];
+        $current['f'][$i] = $factor * (float)$ing['fat_per_100'];
+        $current['c'][$i] = $factor * (float)$ing['carb_per_100'];
+        $current['cost'][$i] = getUnitCost($db, (int)$ing['product_id']) * (float)$ing['amount'];
+    }
+    $logged = [
+        'kj' => [(float)$entry['kj'], 0], 'p' => [(float)$entry['protein'], 1], 'f' => [(float)$entry['fat'], 1], 'c' => [(float)$entry['carb'], 1],
+        'cost' => [(float)$entry['amount'] * ((float)$entry['unit_cost'] ?: (float)$entry['last_unit_cost']), 2],
+    ];
+    $split = [];
+    foreach ($logged as $key => [$total, $decimals]) {
+        $shares = array_sum($current[$key]) > 0 ? $current[$key] : $weights;
+        $split[$key] = apportionToTotal($shares, $total, $decimals);
+    }
+
+    $rows = [];
+    foreach ($ingredients as $i => $ing) {
+        $rows[] = [
+            'name' => $ing['product_name'],
+            'amount' => (float)$ing['amount'] * $ratio,
+            'unit' => $ing['unit'],
+            'kj' => $split['kj'][$i], 'p' => $split['p'][$i], 'f' => $split['f'][$i], 'c' => $split['c'][$i],
+            'cost' => $split['cost'][$i],
+        ];
+    }
+    return $rows;
+}
+
+/**
  * Canonical category order — single source of truth for category sorting.
  */
 define('SPENCE_CATEGORIES', [

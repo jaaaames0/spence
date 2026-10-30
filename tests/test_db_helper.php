@@ -53,6 +53,10 @@ try {
     assertSameValue(14.0, adjustLoggedInventory($db, ['product_id' => 7, 'amount' => 2.5, 'unit_cost' => 14, 'unit' => 'kg'], 2), 'Eating less keeps the logged unit cost');
     assertSameValue([1.0, 17.0], array_map('floatval', $db->query('SELECT current_qty, price_paid FROM inventory WHERE id = 5')->fetch(PDO::FETCH_NUM)), 'Returned stock should carry the logged cost');
 
+    assertSameValue([33.4, 33.3, 33.3], apportionToTotal([1, 1, 1], 100, 1), 'Apportioned parts should add up to the total');
+    assertSameValue(['a' => 0.0, 'b' => 7.0], apportionToTotal(['a' => 0, 'b' => 5], 7), 'Shares should keep their keys');
+    assertSameValue([2.5, 2.5], apportionToTotal([0, 0], 5, 1), 'All-zero shares should split evenly');
+
     // Local days follow each timestamp's own offset: 13:30 UTC is 23:30 AEST in July, not 00:30 next day
     assertSameValue(['2026-06-30 14:00:00', '2026-07-01 14:00:00'], spenceLocalDayBounds('2026-07-01'), 'Winter local day bounds used the wrong offset');
     assertSameValue(['2026-10-03 14:00:00', '2026-10-04 13:00:00'], spenceLocalDayBounds('2026-10-04'), 'DST start day should be 23 hours long');
