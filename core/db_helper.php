@@ -207,6 +207,8 @@ function get_db_connection(?string $dbPath = null): PDO {
         )');
     });
 
+    // Shares the 007_ prefix with 007_activity_rate_override (both branches were numbered at once).
+    // Versions are recorded in live databases, so never rename one; number new migrations from 010.
     applyDatabaseMigration($db, '007_purchase_and_waste_logs', function (PDO $db): void {
         // No product FKs: like consumption_log, history must survive product deletes and merges.
         $db->exec('CREATE TABLE IF NOT EXISTS purchase_log (

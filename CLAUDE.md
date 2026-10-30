@@ -42,7 +42,7 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 - `core/recipes.php` — `saveRecipe()` for the RecipeDB editor: ingredients by posted product id (through `merges_into`); an ingredient change forks a new version and retires the edited lineage
 - `core/receipt_ingest.php` — maps the vision model's JSON output to DB inserts, AI catalogue matching
 
-**Database:** `database/schema.sql` is the canonical schema. `database/spence_empty.db` is the blank template committed to git. Live `spence.db` is gitignored.
+**Database:** migrations in `get_db_connection()` (`core/db_helper.php`) are the source of truth. `database/schema.sql` (the fully migrated schema) and `database/spence_empty.db` (the blank template, all migrations recorded) are generated from them by `ops/rebuild-schema.php`; run it after adding a migration, or `tests/test_schema.php` fails. Live `spence.db` is gitignored.
 
 ## Key Domain Concepts
 
