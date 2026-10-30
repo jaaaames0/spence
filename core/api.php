@@ -192,11 +192,12 @@ try {
                 $old_recipe = $stmt->fetch(PDO::FETCH_ASSOC);
                 $parent_id = $old_recipe['parent_recipe_id'] ?: $recipe_id;
                 
-                // Deactivate old version
-                $db->prepare("UPDATE recipes SET is_active = 0 WHERE name = ? AND is_active = 1")->execute([$name]);
+                // Retire the edited recipe and anything else active in its lineage, by id: $name may be a rename
+                $db->prepare("UPDATE recipes SET is_active = 0 WHERE is_active = 1 AND (id = ? OR id = ? OR parent_recipe_id = ?)")
+                   ->execute([$recipe_id, $parent_id, $parent_id]);
                 
-                $stmt = $db->prepare("SELECT MAX(version) FROM recipes WHERE name = ? OR parent_recipe_id = ?");
-                $stmt->execute([$name, $parent_id]);
+                $stmt = $db->prepare("SELECT MAX(version) FROM recipes WHERE id = ? OR parent_recipe_id = ?");
+                $stmt->execute([$parent_id, $parent_id]);
                 $version = (int)$stmt->fetchColumn() + 1;
             } else {
                 // Check if a recipe with this name already exists to handle naming collisions/re-activation
