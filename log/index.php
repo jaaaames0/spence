@@ -176,7 +176,7 @@ include '../core/page_head.php';
                                             <span class="color-cost">$<?= number_format($entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']), 2) ?></span>
                                         </div>
                                     </td>
-                            <td class="d-none d-md-table-cell text-center small"><?= $entry['amount'] ?><?= $entry['unit'] ?></td>
+                            <td class="d-none d-md-table-cell text-center small"><?= $entry['amount'] ?><?= htmlspecialchars((string)$entry['unit']) ?></td>
                             <td class="d-none d-md-table-cell text-center color-kj fw-bold"><?= number_format($entry['kj']) ?></td>
                             <td class="d-none d-md-table-cell text-center color-p fw-bold"><?= number_format($entry['protein'], 1) ?>g</td>
                             <td class="d-none d-md-table-cell text-center color-f fw-bold"><?= number_format($entry['fat'], 1) ?>g</td>
@@ -192,7 +192,7 @@ include '../core/page_head.php';
                             <tr class="child-row">
                                 <td></td><td class="text-center text-muted small"><i class="bi bi-arrow-return-right"></i></td>
                                 <td class="text-muted"><?= htmlspecialchars($ing['name']) ?></td>
-                                <td class="d-none d-md-table-cell text-center text-muted small"><?= $ing['amount'] < 0.1 ? number_format($ing['amount'], 3) : number_format($ing['amount'], 2) ?><?= $ing['unit'] ?></td>
+                                <td class="d-none d-md-table-cell text-center text-muted small"><?= $ing['amount'] < 0.1 ? number_format($ing['amount'], 3) : number_format($ing['amount'], 2) ?><?= htmlspecialchars((string)$ing['unit']) ?></td>
                                 <td class="d-none d-md-table-cell text-center color-kj small"><?= number_format($ing['kj']) ?></td>
                                 <td class="d-none d-md-table-cell text-center color-p small"><?= number_format($ing['p'], 1) ?>g</td>
                                 <td class="d-none d-md-table-cell text-center color-f small"><?= number_format($ing['f'], 1) ?>g</td>

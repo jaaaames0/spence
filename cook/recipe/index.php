@@ -339,7 +339,7 @@ include '../../core/page_head.php';
                         data-kj="${s.kj_per_100||0}" data-p="${s.protein_per_100||0}"
                         data-f="${s.fat_per_100||0}" data-c="${s.carb_per_100||0}" data-wpe="${s.weight_per_ea||1}">
                         <span class="fw-bold" style="color:${sel?'#4caf50':'#ddd'};">${escHtml(s.name)}</span>
-                        <small class="text-muted ms-2">${parseFloat(s.stock).toFixed(3)} ${s.unit}</small>
+                        <small class="text-muted ms-2">${parseFloat(s.stock).toFixed(3)} ${escHtml(s.unit)}</small>
                     </div>`;
                 });
             }

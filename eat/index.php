@@ -539,7 +539,7 @@ include '../core/page_head.php';
             <div class="mb-2 p-2" style="background:#1a1a1a; border:1px solid #333; border-radius:4px;">
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <input type="checkbox" class="form-check-input qe-chk flex-shrink-0" id="qe-chk-${i}" checked onchange="updateQeTotals()">
-                    <input type="text" class="form-control form-control-sm fw-bold" id="qe-name-${i}" value="${item.name || ''}" style="flex:1;">
+                    <input type="text" class="form-control form-control-sm fw-bold" id="qe-name-${i}" value="${escHtml(item.name)}" style="flex:1;">
                     <div class="input-group input-group-sm" style="width:100px; flex-shrink:0;">
                         <input type="number" class="form-control form-control-sm text-end qe-weight" id="qe-weight-${i}" value="${Math.round(item.estimated_weight_g) || ''}" min="1" oninput="updateQeTotals()">
                         <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666; font-size:0.7rem;">g</span>
@@ -547,9 +547,9 @@ include '../core/page_head.php';
                 </div>
                 <div class="d-flex gap-1 align-items-center">
                     <input type="number" class="form-control form-control-sm text-center qe-kj" id="qe-kj-${i}" value="${Math.round(item.kj_per_100) || 0}" oninput="updateQeTotals()" title="kJ/100g" style="width:60px;" placeholder="kJ">
-                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-p" id="qe-p-${i}" value="${item.protein_per_100 || 0}" oninput="updateQeTotals()" title="Protein/100g" style="width:55px;" placeholder="P">
-                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-f" id="qe-f-${i}" value="${item.fat_per_100 || 0}" oninput="updateQeTotals()" title="Fat/100g" style="width:55px;" placeholder="F">
-                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-c" id="qe-c-${i}" value="${item.carbs_per_100 || 0}" oninput="updateQeTotals()" title="Carbs/100g" style="width:55px;" placeholder="C">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-p" id="qe-p-${i}" value="${escHtml(item.protein_per_100 || 0)}" oninput="updateQeTotals()" title="Protein/100g" style="width:55px;" placeholder="P">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-f" id="qe-f-${i}" value="${escHtml(item.fat_per_100 || 0)}" oninput="updateQeTotals()" title="Fat/100g" style="width:55px;" placeholder="F">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-c" id="qe-c-${i}" value="${escHtml(item.carbs_per_100 || 0)}" oninput="updateQeTotals()" title="Carbs/100g" style="width:55px;" placeholder="C">
                     <span class="text-muted ms-1" style="font-size:0.6rem; white-space:nowrap;">per 100g</span>
                     <div class="input-group input-group-sm ms-auto" style="width:92px; flex-shrink:0;">
                         <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666;">$</span>
@@ -559,7 +559,7 @@ include '../core/page_head.php';
                         <input class="form-check-input mt-0 qe-master" type="checkbox" id="qe-master-${i}">
                         <label class="form-check-label text-muted" style="font-size:0.65rem;" for="qe-master-${i}">Add to Master</label>
                     </div>
-                    <input type="hidden" id="qe-cat-${i}" value="${item.category || 'Other'}">
+                    <input type="hidden" id="qe-cat-${i}" value="${escHtml(item.category || 'Other')}">
                 </div>
             </div>
         `).join('');

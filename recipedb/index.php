@@ -339,12 +339,12 @@ include '../core/page_head.php';
                 </div>
                 <div style="flex:0 0 60px;">
                     <input type="number" step="0.001" name="ing_amount[]" class="form-control form-control-sm ing-amount"
-                           placeholder="Qty" value="${ing ? ing.amount : ''}" oninput="recalcPreview()" required
+                           placeholder="Qty" value="${ing ? escHtml(ing.amount) : ''}" oninput="recalcPreview()" required
                            style="padding:2px 4px; text-align:center;">
                 </div>
                 <div style="flex:0 0 auto;">
-                    <span class="ing-unit fw-bold text-white" style="font-size:0.75rem; white-space:nowrap;">${ing ? ing.unit : '—'}</span>
-                    <input type="hidden" name="ing_unit[]" value="${ing ? ing.unit : ''}">
+                    <span class="ing-unit fw-bold text-white" style="font-size:0.75rem; white-space:nowrap;">${ing ? escHtml(ing.unit) : '—'}</span>
+                    <input type="hidden" name="ing_unit[]" value="${ing ? escHtml(ing.unit) : ''}">
                     <input type="hidden" name="ing_product_id[]" value="${ing ? (parseInt(ing.product_id) || '') : ''}">
                 </div>
                 <div style="flex:0 0 auto;">

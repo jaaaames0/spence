@@ -411,7 +411,7 @@ include '../core/page_head.php';
                     document.getElementById('scanBtn').disabled = false;
 
                     if (res.status !== 'success') {
-                        statusAlert.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>' + (res.message || 'Scan failed.');
+                        statusAlert.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>' + escHtml(res.message || 'Scan failed.');
                         return;
                     }
 
