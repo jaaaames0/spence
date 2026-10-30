@@ -398,7 +398,11 @@ function getActiveEnergyPlan(PDO $db, string $day): array {
     $fatEnergy = (float)$goals['f'] * 37.656; $carbEnergy = (float)$goals['c'] * 16.736;
     $remaining = max(0, $target - $protein * 16.736);
     $fatShare = ($fatEnergy + $carbEnergy) > 0 ? $fatEnergy / ($fatEnergy + $carbEnergy) : 0.4;
-    $regime = inferEnergyRegime(null, $goals['goal_type'], (float)($prefs['goal_adjustment_kj'] ?? 0)) ?? 'maintenance';
+    // The regime follows the plan actually in force: the calibrated adjustment when calibrated,
+    // otherwise the saved goal (a missing preference row is not a maintenance choice)
+    $regime = ($calibrated
+        ? inferEnergyRegime(null, $goals['goal_type'], $goalAdjustment)
+        : inferEnergyRegime($goals['regime'], $goals['goal_type']) ?? inferEnergyRegime(null, null, $goalAdjustment)) ?? 'maintenance';
     return ['maintenance' => $maintenance, 'formula_maintenance' => $formula, 'target_kj' => $target, 'protein' => $protein,
         'fat' => $remaining * $fatShare / 37.656, 'carb' => $remaining * (1 - $fatShare) / 16.736,
         'calibrated' => $calibrated, 'training' => $training, 'calibration' => $calibration, 'goal_adjustment' => $goalAdjustment,

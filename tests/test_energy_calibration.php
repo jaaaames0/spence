@@ -1,6 +1,7 @@
 <?php
 /** Energy-regime regression checks; run with: php -n tests/test_energy_calibration.php */
 
+require_once __DIR__ . '/../core/db_helper.php';
 require_once __DIR__ . '/../core/energy_calibration.php';
 
 function assertEnergyValue(mixed $expected, mixed $actual, string $message): void {
@@ -133,5 +134,23 @@ assertEnergyValue('orange', getNutritionTargetZone('energy', 10500, 10000, 'cut'
 assertEnergyValue('green', getNutritionTargetZone('protein', 120, 100, 'cut'), 'Protein should reward a bounded overshoot in every regime');
 assertEnergyValue('green', getNutritionTargetZone('fat', 75, 100, 'bulk'), 'Fat should have a broad symmetric green zone');
 assertEnergyValue('red', getNutritionTargetZone('carb', 170, 100, 'cut'), 'Extreme macro overshoots should still be red');
+
+// An uncalibrated plan takes its regime from the saved goal, not a missing energy_preferences row
+putenv('FORGE_DB_PATH=/nonexistent/forge-export.db');
+$planPath = tempnam(sys_get_temp_dir(), 'spence-plan-test-');
+try {
+    (new PDO('sqlite:' . $planPath))->exec(file_get_contents(__DIR__ . '/../database/schema.sql'));
+    $planDb = get_db_connection($planPath);
+    $planDb->exec("INSERT INTO user_profiles (id, name, activity_rate) VALUES (1, 'Test', 1.55)");
+    $planDb->exec("INSERT INTO user_vitals_history (user_id, weight_kg, body_fat_pct) VALUES (1, 90, 20)");
+    $planDb->exec("INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily, start_date, regime) VALUES (1, 'Fat Loss', 9000, 180, 70, 200, 20, '2026-01-01', 'cut')");
+    assertEnergyValue('cut', getActiveEnergyPlan($planDb, date('Y-m-d'))['regime'], 'A fresh Fat Loss plan should be a cut');
+    $planDb->exec("UPDATE user_goals_history SET goal_type = 'Custom', regime = NULL, target_kj = 20000");
+    assertEnergyValue('bulk', getActiveEnergyPlan($planDb, date('Y-m-d'))['regime'], 'A custom target above formula maintenance should be a bulk');
+    $planDb->exec("INSERT INTO energy_preferences (id, use_calibrated_targets, goal_adjustment_kj) VALUES (1, 0, 0)");
+    assertEnergyValue('bulk', getActiveEnergyPlan($planDb, date('Y-m-d'))['regime'], 'An unused calibrated adjustment should not decide the regime');
+} finally {
+    foreach (['', '-wal', '-shm'] as $suffix) @unlink($planPath . $suffix);
+}
 
 echo "Energy calibration tests passed\n";
