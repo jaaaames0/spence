@@ -330,6 +330,41 @@ function deductInventoryLots(PDO $db, int $productId, float $requiredQty, float 
 }
 
 /**
+ * Move stock for an edited inventory log entry and return the entry's new unit cost.
+ * Eating more deducts across lots at each lot's own cost basis; eating less returns the
+ * difference at the cost it was logged at. The log's total cost stays equal to the stock removed.
+ */
+function adjustLoggedInventory(PDO $db, array $log, float $newAmount): float {
+    $productId = (int)$log['product_id'];
+    $oldAmount = (float)$log['amount'];
+    $loggedCost = (float)$log['unit_cost'];
+    $diff = $newAmount - $oldAmount;
+
+    if ($diff > 0.0001) {
+        $deducted = deductInventoryLots($db, $productId, $diff, 0.0001);
+        return ($oldAmount * $loggedCost + $deducted['cost']) / $newAmount;
+    }
+    if ($diff < -0.0001) {
+        $returned = -$diff;
+        $unitCost = $loggedCost ?: getUnitCost($db, $productId);
+        $stmt = $db->prepare("SELECT id FROM inventory WHERE product_id = ? ORDER BY location = 'Fridge' DESC, updated_at DESC LIMIT 1");
+        $stmt->execute([$productId]);
+        $inventoryId = $stmt->fetchColumn();
+        if ($inventoryId) {
+            $db->prepare("UPDATE inventory SET current_qty = current_qty + ?, price_paid = price_paid + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+               ->execute([$returned, $unitCost * $returned, $inventoryId]);
+        } else {
+            $stmt = $db->prepare("SELECT base_unit FROM products WHERE id = ?");
+            $stmt->execute([$productId]);
+            $baseUnit = $stmt->fetchColumn() ?: ($log['unit'] ?: 'ea');
+            $db->prepare("INSERT INTO inventory (product_id, current_qty, unit, price_paid, location) VALUES (?, ?, ?, ?, 'Fridge')")
+               ->execute([$productId, $returned, $baseUnit, $unitCost * $returned]);
+        }
+    }
+    return $loggedCost;
+}
+
+/**
  * When a product stops being counted by the item, its per-item history moves to weight.
  * Log rows keep only amount + unit, so a '1 ea' left on a kg product would later be
  * read through the kg product's placeholder weight_per_ea (1.0) as a whole kilo.

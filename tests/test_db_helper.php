@@ -45,6 +45,14 @@ try {
     assertSameValue(2.5, $result['quantity'], 'Wrong quantity deducted across lots');
     assertSameValue(35.0, $result['cost'], 'Wrong cost deducted across lots');
 
+    // Editing a log upward deducts at each lot's cost basis, not the log's unit cost
+    $db->exec("INSERT INTO inventory (id, product_id, current_qty, price_paid, location) VALUES (4, 7, 1, 10, 'Pantry'), (5, 7, 2, 40, 'Fridge')");
+    $editedCost = adjustLoggedInventory($db, ['product_id' => 7, 'amount' => 1, 'unit_cost' => 5, 'unit' => 'kg'], 2.5);
+    assertSameValue(14.0, $editedCost, 'Edited log cost should blend in the lots it drew from');
+    assertSameValue([0.5, 10.0], array_map('floatval', $db->query('SELECT current_qty, price_paid FROM inventory WHERE id = 5')->fetch(PDO::FETCH_NUM)), 'Lot was not deducted at its own cost basis');
+    assertSameValue(14.0, adjustLoggedInventory($db, ['product_id' => 7, 'amount' => 2.5, 'unit_cost' => 14, 'unit' => 'kg'], 2), 'Eating less keeps the logged unit cost');
+    assertSameValue([1.0, 17.0], array_map('floatval', $db->query('SELECT current_qty, price_paid FROM inventory WHERE id = 5')->fetch(PDO::FETCH_NUM)), 'Returned stock should carry the logged cost');
+
     // Local days follow each timestamp's own offset: 13:30 UTC is 23:30 AEST in July, not 00:30 next day
     assertSameValue(['2026-06-30 14:00:00', '2026-07-01 14:00:00'], spenceLocalDayBounds('2026-07-01'), 'Winter local day bounds used the wrong offset');
     assertSameValue(['2026-10-03 14:00:00', '2026-10-04 13:00:00'], spenceLocalDayBounds('2026-10-04'), 'DST start day should be 23 hours long');

@@ -294,45 +294,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
-            $stmt = $db->prepare("SELECT base_unit FROM products WHERE id = ?");
-            $stmt->execute([$log['product_id']]);
-            $base_unit = $stmt->fetchColumn() ?: ($log['unit'] ?: 'ea');
-
-            $diff = $new_amount - $log['amount'];
-            $unit_cost = (float)$log['unit_cost'] ?: getUnitCost($db, $log['product_id']);
-            
-            if ($diff > 0) {
-                $stmt = $db->prepare("SELECT id, current_qty FROM inventory WHERE product_id = ? AND current_qty > 0 ORDER BY location = 'Fridge' DESC, updated_at DESC");
-                $stmt->execute([$log['product_id']]);
-                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                $to_consume = $diff;
-                foreach ($rows as $row) {
-                    if ($to_consume <= 0) break;
-                    $deduct = min($row['current_qty'], $to_consume);
-                    $price_deduct = $unit_cost * $deduct;
-                    $db->prepare("UPDATE inventory SET current_qty = current_qty - ?, price_paid = price_paid - ? WHERE id = ?")->execute([$deduct, $price_deduct, $row['id']]);
-                    $to_consume -= $deduct;
-                }
-                if ($to_consume > 0.0001) throw new Exception("Insufficient stock.");
-            } elseif ($diff < 0) {
-                $abs_diff = abs($diff);
-                $price_return = $unit_cost * $abs_diff;
-                $stmt = $db->prepare("SELECT id FROM inventory WHERE product_id = ? ORDER BY location = 'Fridge' DESC, updated_at DESC LIMIT 1");
-                $stmt->execute([$log['product_id']]);
-                $inv = $stmt->fetch(PDO::FETCH_ASSOC);
-                if ($inv) {
-                    $db->prepare("UPDATE inventory SET current_qty = current_qty + ?, price_paid = price_paid + ? WHERE id = ?")->execute([$abs_diff, $price_return, $inv['id']]);
-                } else {
-                    $db->prepare("INSERT INTO inventory (product_id, current_qty, unit, price_paid, location) VALUES (?, ?, ?, ?, 'Fridge')")->execute([$log['product_id'], $abs_diff, $base_unit, $price_return]);
-                }
-            }
+            $unit_cost = adjustLoggedInventory($db, $log, $new_amount);
             $stmt = $db->prepare("SELECT * FROM products WHERE id = ?");
             $stmt->execute([$log['product_id']]);
             $p = $stmt->fetch(PDO::FETCH_ASSOC);
             $macros = calculateMacros($p, $new_amount, $log['unit'] ?: $p['base_unit']);
             $kj = $macros['kj']; $protein = $macros['protein']; $fat = $macros['fat']; $carb = $macros['carb'];
-            $stmt = $db->prepare("UPDATE consumption_log SET amount = ?, kj = ?, protein = ?, fat = ?, carb = ? WHERE id = ?");
-            $stmt->execute([$new_amount, $kj, $protein, $fat, $carb, $log_id]);
+            $stmt = $db->prepare("UPDATE consumption_log SET amount = ?, kj = ?, protein = ?, fat = ?, carb = ?, unit_cost = ? WHERE id = ?");
+            $stmt->execute([$new_amount, $kj, $protein, $fat, $carb, $unit_cost, $log_id]);
             $db->commit();
             echo json_encode(['status' => 'success']);
         }
