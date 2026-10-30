@@ -39,6 +39,7 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 **Core logic files:**
 - `core/db_helper.php` — PDO connection, `getUnitCost()`, `syncRecipeToProduct()` (recalculates macros/cost when recipe changes)
 - `core/matching.php` — Jaccard similarity deduplication during ingest
+- `core/recipes.php` — `saveRecipe()` for the RecipeDB editor: ingredients by posted product id (through `merges_into`); an ingredient change forks a new version and retires the edited lineage
 - `core/receipt_ingest.php` — maps the vision model's JSON output to DB inserts, AI catalogue matching
 
 **Database:** `database/schema.sql` is the canonical schema. `database/spence_empty.db` is the blank template committed to git. Live `spence.db` is gitignored.

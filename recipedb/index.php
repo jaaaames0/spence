@@ -345,6 +345,7 @@ include '../core/page_head.php';
                 <div style="flex:0 0 auto;">
                     <span class="ing-unit fw-bold text-white" style="font-size:0.75rem; white-space:nowrap;">${ing ? ing.unit : '—'}</span>
                     <input type="hidden" name="ing_unit[]" value="${ing ? ing.unit : ''}">
+                    <input type="hidden" name="ing_product_id[]" value="${ing ? (parseInt(ing.product_id) || '') : ''}">
                 </div>
                 <div style="flex:0 0 auto;">
                     <button type="button" class="btn-icon ing-stock-btn"
@@ -377,6 +378,11 @@ include '../core/page_head.php';
                 onSelect: p => selectIngredient(div, p.id),
             });
             search.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 150));
+            // Typing over a picked ingredient unpicks it; the server then matches the typed name exactly
+            search.addEventListener('input', () => {
+                div.dataset.productId = '';
+                div.querySelector('input[name="ing_product_id[]"]').value = '';
+            });
             if (focus) search.focus();
 
             // If editing an existing ingredient, populate the stock button immediately
@@ -391,6 +397,7 @@ include '../core/page_head.php';
             if (!product) return;
 
             row.dataset.productId = productId;
+            row.querySelector('input[name="ing_product_id[]"]').value = productId;
             row.querySelector('.ing-search').value = product.name;
             row.querySelector('.ing-unit').innerText = product.base_unit;
             row.querySelector('input[name="ing_unit[]"]').value = product.base_unit;
