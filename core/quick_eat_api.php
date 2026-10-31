@@ -57,7 +57,10 @@ try {
         } else {
             $description = trim($_POST['description'] ?? '');
             if ($description === '') throw new Exception("Describe the food first.");
-            if (mb_strlen($description) > 1000) throw new Exception("Description is too long.");
+            // Count characters with PCRE: the mbstring extension isn't installed on the host.
+            $length = preg_match_all('/./su', $description);
+            if ($length === false) throw new Exception("Description contains invalid characters.");
+            if ($length > 1000) throw new Exception("Description is too long.");
 
             $prompt = "Task: Identify ALL distinct food items in the description below and estimate nutritional macros for each.\n\n"
                 . "The description may name a brand, restaurant, product or home-cooked dish. Use your knowledge of that product's "
