@@ -375,7 +375,6 @@ include '../core/page_head.php';
                     </div>
                     <!-- State 3: Review + edit (multi-item) -->
                     <div id="qeReviewState" style="display:none;">
-                        <div class="text-muted mb-2" style="font-size:0.7rem;">Tap an item's tag to change it: <span style="color:#4caf50;">Matched</span> logs against your product, <span style="color:#0dcaf0;">New product</span> adds it, Log only does neither.</div>
                         <div id="qeItemList" class="mb-3"></div>
                         <!-- Combined totals -->
                         <div class="p-3 rounded" style="background:#0a0a0a; border:1px solid #444;">
