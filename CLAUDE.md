@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-SPENCE is a single-user PHP/SQLite kitchen inventory, recipe, and nutritional logging app. It uses NanoGPT (`google/gemini-3.7-flash`, via `core/nanogpt_client.php`) to parse grocery receipts and Quick Eat food photos with vision AI and auto-populate inventory. Designed for local-first personal use — not hardened for public internet exposure.
+SPENCE is a single-user PHP/SQLite kitchen inventory, recipe, and nutritional logging app. It uses NanoGPT (`google/gemini-3.7-flash`, via `core/nanogpt_client.php`) to parse grocery receipts and Quick Eat food photos (JPG/PNG/WebP/HEIC) with vision AI, estimate macros from a text description (Quick Eat → New Food (Describe)), and auto-populate inventory. Designed for local-first personal use — not hardened for public internet exposure.
 
 ## Running the App
 

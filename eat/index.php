@@ -102,6 +102,7 @@ include '../core/page_head.php';
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark">
                         <li><a class="dropdown-item" href="#" onclick="document.getElementById('qeNewFoodInput').click(); return false;"><i class="bi bi-camera-fill me-2" style="color:#ff9800;"></i>New Food (Photo)</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="openQuickEatDescribe(); return false;"><i class="bi bi-chat-text-fill me-2" style="color:#ff9800;"></i>New Food (Describe)</a></li>
                         <li><a class="dropdown-item" href="#" onclick="openQuickEatExisting(); return false;"><i class="bi bi-list-ul me-2"></i>Existing Product</a></li>
                     </ul>
                 </div>
@@ -340,7 +341,7 @@ include '../core/page_head.php';
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title fw-black uppercase"><i class="bi bi-camera-fill me-2" style="color:#ff9800;"></i>Quick Eat — New Food</h5>
+                    <h5 class="modal-title fw-black uppercase"><i id="qeModalIcon" class="bi bi-camera-fill me-2" style="color:#ff9800;"></i>Quick Eat — New Food</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -349,6 +350,14 @@ include '../core/page_head.php';
                         <div class="mb-3 text-center">
                             <img id="qePreviewImg" src="" style="max-height:220px; max-width:100%; border-radius:4px; border:1px solid #333;">
                         </div>
+                        <button class="btn w-100 fw-bold uppercase py-2" onclick="doScan()" style="background:#ff9800; color:#000; border:none;">
+                            <i class="bi bi-cpu me-1"></i>Analyse Food
+                        </button>
+                    </div>
+                    <!-- State 1 (describe): text description + analyse button -->
+                    <div id="qeDescribeState" style="display:none;">
+                        <textarea id="qeDescription" class="form-control mb-2" rows="3" maxlength="1000" placeholder="e.g. large flat white with full cream milk, 2 slices of Domino's pepperoni pizza" data-autofocus onkeydown="if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); doScan(); }"></textarea>
+                        <div class="text-muted small mb-3">Include brand, size and amount where you know them.</div>
                         <button class="btn w-100 fw-bold uppercase py-2" onclick="doScan()" style="background:#ff9800; color:#000; border:none;">
                             <i class="bi bi-cpu me-1"></i>Analyse Food
                         </button>
@@ -473,6 +482,7 @@ include '../core/page_head.php';
     const qeAllProducts   = <?= json_encode($qe_products) ?>;
     let qeSelectedProduct = null;
     let qeSelectedFile    = null;
+    let qeMode            = 'photo'; // 'photo' | 'describe'
 
     // ---- Photo path ----
     function qeNewFoodSelected(input) {
@@ -482,6 +492,7 @@ include '../core/page_head.php';
         const reader = new FileReader();
         reader.onload = e => {
             document.getElementById('qePreviewImg').src = e.target.result;
+            qeMode = 'photo';
             resetPhotoModal();
             qePhotoModal.show();
         };
@@ -489,8 +500,22 @@ include '../core/page_head.php';
         input.value = ''; // Reset so same file can be re-selected
     }
 
+    // ---- Describe path (same modal, text instead of a photo) ----
+    function openQuickEatDescribe() {
+        qeMode = 'describe';
+        document.getElementById('qeDescription').value = '';
+        resetPhotoModal();
+        qePhotoModal.show();
+    }
+
+    function showQeInputState() {
+        document.getElementById('qeScanState').style.display = qeMode === 'photo' ? '' : 'none';
+        document.getElementById('qeDescribeState').style.display = qeMode === 'describe' ? '' : 'none';
+    }
+
     function resetPhotoModal() {
-        document.getElementById('qeScanState').style.display = '';
+        document.getElementById('qeModalIcon').className = (qeMode === 'photo' ? 'bi bi-camera-fill' : 'bi bi-chat-text-fill') + ' me-2';
+        showQeInputState();
         document.getElementById('qeScanningState').style.display = 'none';
         document.getElementById('qeReviewState').style.display = 'none';
         document.getElementById('qeSuccessState').style.display = 'none';
@@ -499,32 +524,38 @@ include '../core/page_head.php';
     }
 
     function doScan() {
-        if (!qeSelectedFile) return;
+        const data = new FormData();
+        if (qeMode === 'describe') {
+            const description = document.getElementById('qeDescription').value.trim();
+            if (!description) { document.getElementById('qeDescription').focus(); return; }
+            data.append('action', 'describe');
+            data.append('description', description);
+        } else {
+            if (!qeSelectedFile) return;
+            data.append('action', 'scan');
+            data.append('image', qeSelectedFile);
+        }
 
         document.getElementById('qeScanState').style.display = 'none';
+        document.getElementById('qeDescribeState').style.display = 'none';
         document.getElementById('qeScanningState').style.display = '';
-
-        const data = new FormData();
-        data.append('action', 'scan');
-        data.append('image', qeSelectedFile);
 
         fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
             .then(r => r.json())
             .then(res => {
                 document.getElementById('qeScanningState').style.display = 'none';
                 if (res.status !== 'success') {
-                    document.getElementById('qeScanState').style.display = '';
+                    showQeInputState();
                     alert('Scan failed: ' + res.message);
                     return;
                 }
-                const d = res.data;
                 renderQeItems(res.items);
                 document.getElementById('qeReviewState').style.display = '';
                 document.getElementById('qeLogBtn').disabled = false;
             })
             .catch(err => {
                 document.getElementById('qeScanningState').style.display = 'none';
-                document.getElementById('qeScanState').style.display = '';
+                showQeInputState();
                 alert('Request failed. Check your connection and try again.\n\n' + err);
             });
     }
@@ -539,7 +570,7 @@ include '../core/page_head.php';
             <div class="mb-2 p-2" style="background:#1a1a1a; border:1px solid #333; border-radius:4px;">
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <input type="checkbox" class="form-check-input qe-chk flex-shrink-0" id="qe-chk-${i}" checked onchange="updateQeTotals()">
-                    <input type="text" class="form-control form-control-sm fw-bold" id="qe-name-${i}" value="${item.name || ''}" style="flex:1;">
+                    <input type="text" class="form-control form-control-sm fw-bold" id="qe-name-${i}" value="${escHtml(item.name)}" style="flex:1;">
                     <div class="input-group input-group-sm" style="width:100px; flex-shrink:0;">
                         <input type="number" class="form-control form-control-sm text-end qe-weight" id="qe-weight-${i}" value="${Math.round(item.estimated_weight_g) || ''}" min="1" oninput="updateQeTotals()">
                         <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666; font-size:0.7rem;">g</span>
@@ -559,7 +590,7 @@ include '../core/page_head.php';
                         <input class="form-check-input mt-0 qe-master" type="checkbox" id="qe-master-${i}">
                         <label class="form-check-label text-muted" style="font-size:0.65rem;" for="qe-master-${i}">Add to Master</label>
                     </div>
-                    <input type="hidden" id="qe-cat-${i}" value="${item.category || 'Other'}">
+                    <input type="hidden" id="qe-cat-${i}" value="${escHtml(item.category || 'Other')}">
                 </div>
             </div>
         `).join('');

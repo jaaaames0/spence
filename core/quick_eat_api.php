@@ -1,6 +1,6 @@
 <?php
 /**
- * SPENCE Quick Eat API — Synchronous vision scan + direct intake logging
+ * SPENCE Quick Eat API — Synchronous vision scan / text lookup + direct intake logging
  * Bypasses inventory entirely. Food goes straight to consumption_log.
  */
 ob_start();
@@ -17,34 +17,58 @@ $api_key = spenceNanoGptKey();
 $action = $_POST['action'] ?? '';
 
 try {
-    if ($action === 'scan') {
+    if ($action === 'scan' || $action === 'describe') {
         if (!$api_key) throw new Exception(spenceNanoGptMissingMessage());
-        if (!isset($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception("No image received.");
-        }
 
-        $file = $_FILES['image'];
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $detected = $finfo->file($file['tmp_name']);
-        $allowed = ['image/jpeg' => 'image/jpeg', 'image/png' => 'image/png'];
-        if (!array_key_exists($detected, $allowed)) {
-            throw new Exception("Only JPG and PNG images are supported.");
-        }
-
-        $b64 = base64_encode(file_get_contents($file['tmp_name']));
-
-        $prompt = "Task: Identify ALL distinct food items visible in this image and estimate nutritional macros for each.\n\n"
-            . "You may see prepared/cooked food (estimate from appearance and standard nutritional data) "
-            . "or packaged food with a visible nutrition label (read the label directly). "
-            . "If multiple distinct foods are visible (e.g. a main and a dessert, or several dishes), return a separate object for each.\n\n"
-            . "Instructions:\n"
+        $instructions = "Instructions:\n"
             . "- Product Name: Clean canonical name in Title Case. Strip brand names and weight/size descriptors "
             . "(e.g., 'Grilled Chicken Breast', 'Greek Yogurt', 'Beef Fried Rice').\n"
-            . "- Estimated Weight: Total grams of that specific item visible, or a standard single serving if unclear.\n"
-            . "- Macros: Per-100g values. For packaged items, read from the label. For prepared food, estimate.\n"
-            . "- Estimated Cost: The total Australian-dollar cost of the visible portion, not a per-100g price. Estimate from typical local retail or menu pricing.\n"
+            . "- Estimated Weight: Total grams of that specific item, or a standard single serving if unclear.\n"
+            . "- Macros: Per-100g values. For packaged items, use the label. For prepared food, estimate.\n"
+            . "- Estimated Cost: The total Australian-dollar cost of the portion, not a per-100g price. Estimate from typical local retail or menu pricing.\n"
             . "- Category: Best fit from the enum.\n\n"
             . "Return ONLY a valid JSON array of objects, one per distinct food item.";
+
+        if ($action === 'scan') {
+            if (!isset($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
+                throw new Exception("No image received.");
+            }
+
+            $file = $_FILES['image'];
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $detected = $finfo->file($file['tmp_name']);
+            $allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+            if (!in_array($detected, $allowed, true)) {
+                throw new Exception("Only JPG, PNG, WebP and HEIC images are supported.");
+            }
+
+            $b64 = base64_encode(file_get_contents($file['tmp_name']));
+
+            $prompt = "Task: Identify ALL distinct food items visible in this image and estimate nutritional macros for each.\n\n"
+                . "You may see prepared/cooked food (estimate from appearance and standard nutritional data) "
+                . "or packaged food with a visible nutrition label (read the label directly). "
+                . "If multiple distinct foods are visible (e.g. a main and a dessert, or several dishes), return a separate object for each.\n\n"
+                . $instructions;
+
+            $message_content = [
+                ['type' => 'text', 'text' => $prompt],
+                ['type' => 'image_url', 'image_url' => ['url' => "data:{$detected};base64,{$b64}"]]
+            ];
+        } else {
+            $description = trim($_POST['description'] ?? '');
+            if ($description === '') throw new Exception("Describe the food first.");
+            if (mb_strlen($description) > 1000) throw new Exception("Description is too long.");
+
+            $prompt = "Task: Identify ALL distinct food items in the description below and estimate nutritional macros for each.\n\n"
+                . "The description may name a brand, restaurant, product or home-cooked dish. Use your knowledge of that product's "
+                . "published nutrition information where you know it, otherwise standard nutritional data. "
+                . "If the description gives an amount (grams, slices, cups, pieces, 'large'), base the weight on it; otherwise assume a standard single serve. "
+                . "If multiple distinct foods are described (e.g. a burger and fries), return a separate object for each.\n\n"
+                . $instructions
+                . "\n\nDescription:\n" . $description;
+
+            $message_content = $prompt;
+        }
 
         $item_schema = [
             'type' => 'object',
@@ -69,10 +93,7 @@ try {
             'model' => 'google/gemini-3.7-flash',
             'messages' => [[
                 'role' => 'user',
-                'content' => [
-                    ['type' => 'text', 'text' => $prompt],
-                    ['type' => 'image_url', 'image_url' => ['url' => "data:{$detected};base64,{$b64}"]]
-                ]
+                'content' => $message_content
             ]],
             'response_format' => [
                 'type' => 'json_schema',
