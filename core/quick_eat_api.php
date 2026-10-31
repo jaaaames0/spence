@@ -7,6 +7,8 @@ ob_start();
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
 require_once __DIR__ . '/nanogpt_client.php';
+require_once __DIR__ . '/matching.php';
+require_once __DIR__ . '/quick_eat.php';
 ob_clean();
 header('Content-Type: application/json');
 
@@ -20,13 +22,26 @@ try {
     if ($action === 'scan' || $action === 'describe') {
         if (!$api_key) throw new Exception(spenceNanoGptMissingMessage());
 
+        // The catalogue rides along so the model links foods already in it (no second call, no merge step).
+        $db = get_db_connection();
+        $catalogue = quickEatCatalogue($db);
+        $catalogueLines = array_map(fn($p) => "{$p['id']} | {$p['name']} | {$p['category']}", $catalogue);
+
         $instructions = "Instructions:\n"
-            . "- Product Name: Clean canonical name in Title Case. Strip brand names and weight/size descriptors "
-            . "(e.g., 'Grilled Chicken Breast', 'Greek Yogurt', 'Beef Fried Rice').\n"
+            . "- Kind: 'packaged' for a branded or packaged product (a bar, a drink, a pack of biscuits), 'fresh' for a single whole food "
+            . "(fruit, vegetables, eggs, plain meat), 'meal' for a prepared, restaurant or home-cooked dish or a mix of foods.\n"
+            . "- Product Name: Title Case, no pack sizes, store brands or brackets. For packaged products put the product type first, then a comma and the brand "
+            . "and flavour (e.g. 'Protein Bar, Musashi Choc Brownie', 'Croissants, All Butter'). Fresh foods and meals keep a plain name "
+            . "(e.g. 'Strawberries', 'Beef Fried Rice').\n"
             . "- Estimated Weight: Total grams of that specific item, or a standard single serving if unclear.\n"
             . "- Macros: Per-100g values. For packaged items, use the label. For prepared food, estimate.\n"
             . "- Estimated Cost: The total Australian-dollar cost of the portion, not a per-100g price. Estimate from typical local retail or menu pricing.\n"
-            . "- Category: Best fit from the enum.\n\n"
+            . "- Category: Best fit from the enum.\n"
+            . "- Catalogue match, against the household catalogue below: 'same' only when it is that exact product (same item, variant and flavour; "
+            . "wording, word order and a missing brand don't matter), 'similar' when it might be but you can't confirm the variant, flavour or brand, "
+            . "otherwise 'new'. Different flavours, cuts or product types are never 'same' ('Chicken Breast' vs 'Chicken Thigh', 'Salted Butter' vs 'Unsalted'). "
+            . "A meal is only 'same' as a catalogue entry for that same dish. Give the entry's id for 'same' and 'similar', 0 for 'new'.\n\n"
+            . "Household catalogue (id | name | category):\n" . ($catalogueLines ? implode("\n", $catalogueLines) : '(empty)') . "\n\n"
             . "Return ONLY a valid JSON array of objects, one per distinct food item.";
 
         if ($action === 'scan') {
@@ -77,6 +92,9 @@ try {
             'type' => 'object',
             'properties' => [
                 'name'               => ['type' => 'string'],
+                'kind'               => ['type' => 'string', 'enum' => ['packaged', 'fresh', 'meal']],
+                'catalogue_match'    => ['type' => 'string', 'enum' => ['same', 'similar', 'new']],
+                'catalogue_id'       => ['type' => 'integer'],
                 'estimated_weight_g' => ['type' => 'number'],
                 'kj_per_100'         => ['type' => 'number'],
                 'protein_per_100'    => ['type' => 'number'],
@@ -88,7 +106,7 @@ try {
                     'Fruit and Veg', 'Cereals/Grains', 'Snacks/Confectionary', 'Drinks', 'Other'
                 ]]
             ],
-            'required' => ['name', 'estimated_weight_g', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100', 'estimated_cost_aud', 'category'],
+            'required' => ['name', 'kind', 'catalogue_match', 'catalogue_id', 'estimated_weight_g', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100', 'estimated_cost_aud', 'category'],
             'additionalProperties' => false
         ];
 
@@ -119,7 +137,9 @@ try {
         if (isset($items['name'])) $items = [$items];
         if (!is_array($items) || empty($items)) throw new Exception("AI returned no food items.");
 
-        echo json_encode(['status' => 'success', 'items' => array_values($items)]);
+        $byId = array_column($catalogue, null, 'id');
+        $items = array_map(fn($item) => resolveQuickEatMatch($item, $byId), array_values(array_filter($items, 'is_array')));
+        echo json_encode(['status' => 'success', 'items' => $items]);
 
     } elseif ($action === 'log_photo') {
         $db = get_db_connection();
@@ -138,7 +158,8 @@ try {
             $carb_per_100  = (float)($item['carbs_per_100'] ?? 0);
             $estimated_cost = max(0, (float)($item['estimated_cost_aud'] ?? 0));
             $category      = $item['category'] ?? 'Other';
-            $add_to_master = !empty($item['add_to_master']);
+            // 'link' logs against a catalogue product, 'new' adds one, 'none' logs a plain entry.
+            $master        = $item['master'] ?? (!empty($item['add_to_master']) ? 'new' : 'none');
 
             if ($weight_g <= 0) continue;
 
@@ -149,15 +170,20 @@ try {
             $carb    = round($carb_per_100 * $factor, 1);
 
             $product_id = null;
-            if ($add_to_master && $name) {
+            if ($master === 'link') {
+                $stmt = $db->prepare("SELECT id FROM products WHERE id = ? AND is_dropped = 0");
+                $stmt->execute([resolveCanonicalProductId($db, (int)($item['product_id'] ?? 0))]);
+                $product_id = $stmt->fetchColumn() ?: null;
+                if (!$product_id) throw new Exception("\"{$name}\" is linked to a product that no longer exists. Scan again.");
+            } elseif ($master === 'new' && $name) {
                 $stmt = $db->prepare("SELECT id FROM products WHERE LOWER(name) = LOWER(?) AND merges_into IS NULL AND is_dropped = 0 LIMIT 1");
                 $stmt->execute([$name]);
                 $existing_id = $stmt->fetchColumn();
                 if ($existing_id) {
                     $product_id = $existing_id;
                 } else {
-                    $db->prepare("INSERT INTO products (name, category, base_unit, kj_per_100, protein_per_100, fat_per_100, carb_per_100, weight_per_ea, type) VALUES (?, ?, 'kg', ?, ?, ?, ?, 1.0, 'raw')")
-                       ->execute([$name, $category, $kj_per_100, $prot_per_100, $fat_per_100, $carb_per_100]);
+                    $db->prepare("INSERT INTO products (name, category, base_unit, kj_per_100, protein_per_100, fat_per_100, carb_per_100, weight_per_ea, last_unit_cost, type) VALUES (?, ?, 'kg', ?, ?, ?, ?, 1.0, ?, 'raw')")
+                       ->execute([$name, $category, $kj_per_100, $prot_per_100, $fat_per_100, $carb_per_100, $estimated_cost / ($weight_g / 1000)]);
                     $product_id = $db->lastInsertId();
                 }
             }

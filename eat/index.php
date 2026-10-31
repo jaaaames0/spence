@@ -560,11 +560,16 @@ include '../core/page_head.php';
             });
     }
 
+    // Per scanned item: the AI's own estimate, its catalogue match, and what logging will do
+    // with it ('link' to the match, 'new' product, or 'none' for a plain log entry).
+    let qeScan = [];
+
     function renderQeItems(items) {
         // Normalize: model may return a single object instead of array
         if (!Array.isArray(items)) items = items ? [items] : [];
         items = items.filter(Boolean);
         if (!items.length) { alert('AI could not identify any food items. Try again.'); return; }
+        qeScan = items.map(item => ({ ai: item, match: item.match || null, master: item.master || 'none' }));
         const list = document.getElementById('qeItemList');
         list.innerHTML = items.map((item, i) => `
             <div class="mb-2 p-2" style="background:#1a1a1a; border:1px solid #333; border-radius:4px;">
@@ -576,8 +581,8 @@ include '../core/page_head.php';
                         <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666; font-size:0.7rem;">g</span>
                     </div>
                 </div>
-                <div class="d-flex gap-1 align-items-center">
-                    <input type="number" class="form-control form-control-sm text-center qe-kj" id="qe-kj-${i}" value="${Math.round(item.kj_per_100) || 0}" oninput="updateQeTotals()" title="kJ/100g" style="width:60px;" placeholder="kJ">
+                <div class="d-flex flex-wrap gap-1 align-items-center">
+                    <input type="number" class="form-control form-control-sm text-center qe-kj" id="qe-kj-${i}" value="${Math.round(item.kj_per_100) || 0}" oninput="updateQeTotals()" title="kJ/100g" style="width:66px;" placeholder="kJ">
                     <input type="number" step="0.1" class="form-control form-control-sm text-center qe-p" id="qe-p-${i}" value="${item.protein_per_100 || 0}" oninput="updateQeTotals()" title="Protein/100g" style="width:55px;" placeholder="P">
                     <input type="number" step="0.1" class="form-control form-control-sm text-center qe-f" id="qe-f-${i}" value="${item.fat_per_100 || 0}" oninput="updateQeTotals()" title="Fat/100g" style="width:55px;" placeholder="F">
                     <input type="number" step="0.1" class="form-control form-control-sm text-center qe-c" id="qe-c-${i}" value="${item.carbs_per_100 || 0}" oninput="updateQeTotals()" title="Carbs/100g" style="width:55px;" placeholder="C">
@@ -586,15 +591,57 @@ include '../core/page_head.php';
                         <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666;">$</span>
                         <input type="number" step="0.01" min="0" class="form-control form-control-sm text-end qe-cost" id="qe-cost-${i}" value="${Number(item.estimated_cost_aud || 0).toFixed(2)}" title="Estimated total cost (AUD)">
                     </div>
-                    <div class="form-check ms-auto mb-0 d-flex align-items-center gap-1" style="white-space:nowrap;">
-                        <input class="form-check-input mt-0 qe-master" type="checkbox" id="qe-master-${i}">
-                        <label class="form-check-label text-muted" style="font-size:0.65rem;" for="qe-master-${i}">Add to Master</label>
-                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-truncate qe-master" id="qe-master-${i}" onclick="cycleQeMaster(${i})"
+                            style="font-size:0.65rem; max-width:150px; padding:2px 6px;"></button>
                     <input type="hidden" id="qe-cat-${i}" value="${escHtml(item.category || 'Other')}">
                 </div>
             </div>
         `).join('');
+        qeScan.forEach((_, i) => applyQeMaster(i));
         updateQeTotals();
+    }
+
+    // Tap cycles: linked → just log → new product → (back to the match, if there is one).
+    function cycleQeMaster(i) {
+        const s = qeScan[i];
+        s.master = s.master === 'link' ? 'none' : (s.master === 'none' ? 'new' : (s.match ? 'link' : 'none'));
+        applyQeMaster(i);
+        updateQeTotals();
+    }
+
+    // A linked item logs with the catalogue product's name, macros and real price; otherwise the AI's estimate.
+    function applyQeMaster(i) {
+        const s = qeScan[i], m = s.match, linked = s.master === 'link' && m;
+        const src = linked ? m : s.ai;
+        const set = (id, v) => { document.getElementById(id + i).value = v; };
+        set('qe-name-', linked ? m.name : (s.ai.name || ''));
+        set('qe-kj-', Math.round(src.kj_per_100) || 0);
+        set('qe-p-', src.protein_per_100 || 0);
+        set('qe-f-', src.fat_per_100 || 0);
+        set('qe-c-', src.carbs_per_100 || 0);
+        let cost = Number(s.ai.estimated_cost_aud || 0);
+        if (linked && m.last_unit_cost > 0) {
+            const perKg = m.base_unit === 'ea' ? (m.weight_per_ea > 0 ? m.last_unit_cost / m.weight_per_ea : 0) : m.last_unit_cost;
+            const grams = parseFloat(document.getElementById('qe-weight-' + i).value) || 0;
+            if (perKg > 0) cost = perKg * grams / 1000;
+        }
+        set('qe-cost-', cost.toFixed(2));
+        document.getElementById('qe-name-' + i).readOnly = !!linked;
+
+        const chip = document.getElementById('qe-master-' + i);
+        if (linked) {
+            chip.innerHTML = `<i class="bi bi-link-45deg"></i> ${escHtml(m.name)}`;
+            chip.title = 'Logged against this product. Tap if it isn\'t this.';
+            chip.className = chip.className.replace(/btn-outline-\w+/, 'btn-outline-success');
+        } else if (s.master === 'new') {
+            chip.innerHTML = '<i class="bi bi-plus-circle"></i> New product';
+            chip.title = 'Will be added to your products. Tap to just log it.';
+            chip.className = chip.className.replace(/btn-outline-\w+/, 'btn-outline-info');
+        } else {
+            chip.innerHTML = '<i class="bi bi-plus"></i> Add to products';
+            chip.title = 'Logged on its own. Tap to add it to your products.';
+            chip.className = chip.className.replace(/btn-outline-\w+/, 'btn-outline-secondary');
+        }
     }
 
     document.getElementById('qeItemList').addEventListener('keydown', event => {
@@ -633,7 +680,8 @@ include '../core/page_head.php';
                 carbs_per_100:  parseFloat(document.getElementById('qe-c-' + i).value) || 0,
                 estimated_cost_aud: parseFloat(document.getElementById('qe-cost-' + i).value) || 0,
                 category:       document.getElementById('qe-cat-' + i).value,
-                add_to_master:  document.getElementById('qe-master-' + i).checked
+                master:         qeScan[i].master === 'link' && !qeScan[i].match ? 'none' : qeScan[i].master,
+                product_id:     qeScan[i].master === 'link' ? qeScan[i].match.product_id : null
             });
         }
         if (!items.length) { alert('No items selected.'); return; }
