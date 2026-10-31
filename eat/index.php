@@ -68,6 +68,12 @@ $extra_styles = '<style>
     .location-header { border-left: 4px solid #ff9800; padding-left: 15px; margin: 2.5rem 0 1rem 0; color: #ff9800 !important; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; font-size: 1rem; }
     .card-eat { background-color: #1e1e1e; border: 1px solid #333; color: #e0e0e0; cursor: pointer; transition: 0.2s; border-radius: 4px; }
     .card-eat:hover { border-color: #ff9800; background-color: #252525; }
+    /* Quick Eat product tag: one fixed look per state, so a tapped tag on a phone (stuck in hover/focus) never looks different. */
+    .qe-master { font-size: 0.65rem; max-width: 150px; padding: 2px 8px; border: 1px solid; border-radius: 999px; background: transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-tap-highlight-color: transparent; }
+    .qe-master:focus { outline: none; box-shadow: none; }
+    .qe-master[data-state="link"] { color: #4caf50; border-color: #4caf50; }
+    .qe-master[data-state="new"]  { color: #0dcaf0; border-color: #0dcaf0; }
+    .qe-master[data-state="none"] { color: #888; border-color: #555; }
     .qty-large { font-size: 1.25rem; font-weight: 800; color: #fff !important; }
     .unit-label { color: #666 !important; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; }
     .btn-quick { background: #333; border: 1px solid #444; color: #fff !important; font-size: 0.75rem; padding: 12px 2px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; min-width: 0; flex: 1; }
@@ -369,6 +375,7 @@ include '../core/page_head.php';
                     </div>
                     <!-- State 3: Review + edit (multi-item) -->
                     <div id="qeReviewState" style="display:none;">
+                        <div class="text-muted mb-2" style="font-size:0.7rem;">Tap an item's tag to change it: <span style="color:#4caf50;">Matched</span> logs against your product, <span style="color:#0dcaf0;">New product</span> adds it, Log only does neither.</div>
                         <div id="qeItemList" class="mb-3"></div>
                         <!-- Combined totals -->
                         <div class="p-3 rounded" style="background:#0a0a0a; border:1px solid #444;">
@@ -591,8 +598,7 @@ include '../core/page_head.php';
                         <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666;">$</span>
                         <input type="number" step="0.01" min="0" class="form-control form-control-sm text-end qe-cost" id="qe-cost-${i}" value="${Number(item.estimated_cost_aud || 0).toFixed(2)}" title="Estimated total cost (AUD)">
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-secondary text-truncate qe-master" id="qe-master-${i}" onclick="cycleQeMaster(${i})"
-                            style="font-size:0.65rem; max-width:150px; padding:2px 6px;"></button>
+                    <button type="button" class="qe-master" id="qe-master-${i}" onclick="cycleQeMaster(${i})"></button>
                     <input type="hidden" id="qe-cat-${i}" value="${escHtml(item.category || 'Other')}">
                 </div>
             </div>
@@ -629,19 +635,19 @@ include '../core/page_head.php';
         document.getElementById('qe-name-' + i).readOnly = !!linked;
 
         const chip = document.getElementById('qe-master-' + i);
-        if (linked) {
-            chip.innerHTML = `<i class="bi bi-link-45deg"></i> ${escHtml(m.name)}`;
-            chip.title = 'Logged against this product. Tap if it isn\'t this.';
-            chip.className = chip.className.replace(/btn-outline-\w+/, 'btn-outline-success');
-        } else if (s.master === 'new') {
-            chip.innerHTML = '<i class="bi bi-plus-circle"></i> New product';
-            chip.title = 'Will be added to your products. Tap to just log it.';
-            chip.className = chip.className.replace(/btn-outline-\w+/, 'btn-outline-info');
-        } else {
-            chip.innerHTML = '<i class="bi bi-plus"></i> Add to products';
-            chip.title = 'Logged on its own. Tap to add it to your products.';
-            chip.className = chip.className.replace(/btn-outline-\w+/, 'btn-outline-secondary');
-        }
+        // The matched product's name is already in the (locked) name field, so the tag only says what logging does.
+        const state = linked ? 'link' : (s.master === 'new' ? 'new' : 'none');
+        chip.dataset.state = state;
+        chip.innerHTML = {
+            link: '<i class="bi bi-link-45deg"></i> Matched',
+            new:  '<i class="bi bi-plus-circle"></i> New product',
+            none: 'Log only',
+        }[state];
+        chip.title = {
+            link: `Logged against "${m ? m.name : ''}". Tap if it isn't this.`,
+            new:  'Will be added to your products. Tap to change.',
+            none: 'Logged on its own. Tap to change.',
+        }[state];
     }
 
     document.getElementById('qeItemList').addEventListener('keydown', event => {
