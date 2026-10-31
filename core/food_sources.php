@@ -16,9 +16,12 @@ function getFoodSources(PDO $db, ?int $days, string $mode): array {
     $named = fn(string $alias) => "COALESCE(
         (SELECT rp.name FROM recipes r JOIN recipes rp ON rp.id = r.parent_recipe_id WHERE r.id = $alias.recipe_id),
         (SELECT name FROM products WHERE id = $alias.merges_into), $alias.name)";
+    // Only raw products follow the "Type, variant" naming; recipes and plain Quick Eat meals
+    // ("Ham, Cheese and Tomato Toasted Sandwich") are never folded into a type.
+    $groupable = fn(string $alias) => "CASE WHEN $alias.type = 'raw' THEN 1 ELSE 0 END";
     if ($mode === 'ingredient') {
         $sql = "WITH ing AS (
-                SELECT ri.recipe_id, {$named('ip')} AS name, $ingKg AS kg,
+                SELECT ri.recipe_id, {$named('ip')} AS name, {$groupable('ip')} AS groupable, $ingKg AS kg,
                        ip.kj_per_100 * $ingKg / 0.1 AS kj, ip.protein_per_100 * $ingKg / 0.1 AS protein
                 FROM recipe_ingredients ri JOIN products ip ON ip.id = ri.product_id),
             tot AS (SELECT recipe_id, SUM(kj) AS kj, SUM(protein) AS protein, SUM(kg) AS kg
@@ -26,34 +29,57 @@ function getFoodSources(PDO $db, ?int $days, string $mode): array {
             SELECT cl.id, ing.name,
                    COALESCE(cl.kj * ing.kj / NULLIF(tot.kj, 0), 0) AS kj,
                    COALESCE(cl.protein * ing.protein / NULLIF(tot.protein, 0), 0) AS protein,
-                   $logKg * ing.kg / tot.kg AS kg, 0 AS serves
+                   $logKg * ing.kg / tot.kg AS kg, 0 AS serves, ing.groupable
             FROM consumption_log cl
             JOIN products p ON p.id = cl.product_id
             JOIN tot ON tot.recipe_id = p.recipe_id
             JOIN ing ON ing.recipe_id = p.recipe_id
             WHERE $window
             UNION ALL
-            SELECT cl.id, COALESCE({$named('p')}, cl.name), cl.kj, cl.protein, $logKg, 0
+            SELECT cl.id, COALESCE({$named('p')}, cl.name), cl.kj, cl.protein, $logKg, 0, {$groupable('p')}
             FROM consumption_log cl
             LEFT JOIN products p ON p.id = cl.product_id
             WHERE $window AND (p.recipe_id IS NULL OR p.recipe_id NOT IN (SELECT recipe_id FROM tot))";
     } else {
         $sql = "SELECT cl.id, COALESCE({$named('p')}, cl.name) AS name, cl.kj, cl.protein, $logKg AS kg,
-                   CASE WHEN p.type = 'cooked' THEN (CASE WHEN cl.unit = 'ea' THEN cl.amount ELSE cl.amount / NULLIF(p.weight_per_ea, 0) END) ELSE 0 END AS serves
+                   CASE WHEN p.type = 'cooked' THEN (CASE WHEN cl.unit = 'ea' THEN cl.amount ELSE cl.amount / NULLIF(p.weight_per_ea, 0) END) ELSE 0 END AS serves,
+                   {$groupable('p')} AS groupable
             FROM consumption_log cl LEFT JOIN products p ON p.id = cl.product_id
             WHERE $window";
     }
     $foods = [];
-    $seen = [];
     foreach ($db->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $name = $row['name'] ?? '—';
-        $food = $foods[$name] ?? ['name' => $name, 'kj' => 0, 'protein' => 0, 'kg' => 0, 'serves' => 0, 'times' => 0];
+        $food = $foods[$name] ?? ['name' => $name, 'kj' => 0, 'protein' => 0, 'kg' => 0, 'serves' => 0, 'times' => 0, 'entries' => [], 'groupable' => false];
+        $food['groupable'] = $food['groupable'] || (bool)$row['groupable'];
         foreach (['kj', 'protein', 'kg', 'serves'] as $metric) $food[$metric] += max(0, (float)$row[$metric]);
         // A recipe listing an ingredient twice is still one sitting
-        if (!isset($seen[$name][$row['id']])) { $seen[$name][$row['id']] = true; $food['times']++; }
+        $food['entries'][$row['id']] = true;
+        $food['times'] = count($food['entries']);
         $foods[$name] = $food;
     }
     return array_values($foods);
+}
+
+// Foods folded by type (productBaseName: "Bacon, Streaky" and "Bacon, Middle Rashers" are
+// "Bacon"). A type with one food stays that food; with several it carries them as 'variants',
+// and 'times' counts sittings, so two bacons in one meal is still one.
+function groupFoodSources(array $foods): array {
+    $byType = [];
+    // Foods that aren't raw products keep a key of their own so they never join a type.
+    foreach ($foods as $food) $byType[$food['groupable'] ? strtolower(productBaseName($food['name'])) : "\0" . $food['name']][] = $food;
+    $grouped = [];
+    foreach ($byType as $variants) {
+        if (count($variants) === 1) { $grouped[] = $variants[0]; continue; }
+        $group = ['name' => productBaseName($variants[0]['name']), 'kj' => 0, 'protein' => 0, 'kg' => 0, 'serves' => 0, 'entries' => [], 'variants' => $variants];
+        foreach ($variants as $food) {
+            foreach (['kj', 'protein', 'kg', 'serves'] as $metric) $group[$metric] += $food[$metric];
+            $group['entries'] += $food['entries'];
+        }
+        $group['times'] = count($group['entries']);
+        $grouped[] = $group;
+    }
+    return $grouped;
 }
 
 // Foods ordered by $metric (largest first, zeros dropped), each with its share of the total

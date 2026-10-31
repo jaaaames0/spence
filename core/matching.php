@@ -115,7 +115,9 @@ function findSubstitutes($db, $productName, $category = null) {
     };
 
     $targetTokens = $tokenize($productName);
-    if (empty($targetTokens)) return [];
+    // Same type ("Bacon, Streaky" for "Bacon, Middle Rashers") is the best substitute there is
+    $targetType = strtolower(productBaseName($productName));
+    if (empty($targetTokens) && $targetType === '') return [];
 
     // Search only products that are actually IN STOCK
     $query = "
@@ -145,13 +147,15 @@ function findSubstitutes($db, $productName, $category = null) {
         $lev = levenshtein(strtolower($productName), strtolower($p['name']));
         $levRatio = $lev / max(strlen($productName), strlen($p['name']));
 
-        if (count($shared) >= 1 || $levRatio < 0.3) {
+        $sameType = strtolower(productBaseName($p['name'])) === $targetType;
+        if ($sameType || count($shared) >= 1 || $levRatio < 0.3) {
             $subs[] = [
                 'id'             => $p['id'],
                 'name'           => $p['name'],
                 'stock'          => $p['stock'],
                 'unit'           => $p['base_unit'],
-                'match_score'    => count($shared) - ($levRatio * 2),
+                'same_type'      => $sameType,
+                'match_score'    => ($sameType ? 100 : 0) + count($shared) - ($levRatio * 2),
                 'kj_per_100'     => (float)$p['kj_per_100'],
                 'protein_per_100'=> (float)$p['protein_per_100'],
                 'fat_per_100'    => (float)$p['fat_per_100'],

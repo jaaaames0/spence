@@ -385,6 +385,16 @@ function syncRecipeToProduct($db, $recipe_id) {
 }
 
 /**
+ * The product type a name starts with: everything before the first comma, per the naming
+ * convention ("Milk, Full Cream" and "Milk, Skim" are both "Milk"). Names without a comma
+ * are their own type. Used to group and rank variants, never to merge them.
+ */
+function productBaseName(string $name): string {
+    $base = trim(explode(',', $name, 2)[0]);
+    return $base === '' ? trim($name) : $base;
+}
+
+/**
  * Canonical category order — single source of truth for category sorting.
  */
 define('SPENCE_CATEGORIES', [
