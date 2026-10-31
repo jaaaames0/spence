@@ -112,6 +112,8 @@ try {
 
         $request = [
             'model' => 'google/gemini-3.7-flash',
+            // Minimal effort answers in ~4 s instead of ~14 s with the same macros and catalogue links in testing
+            'reasoning_effort' => 'minimal',
             'messages' => [[
                 'role' => 'user',
                 'content' => $message_content

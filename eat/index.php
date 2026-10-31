@@ -529,22 +529,47 @@ include '../core/page_head.php';
         document.getElementById('qeLogBtn').disabled = true;
     }
 
-    function doScan() {
+    // Phone photos are 2-6 MB: the model sees no more detail than 1536 px gives it, a full-size upload
+    // takes ~2.5x as long, and NanoGPT rejects the biggest (HTTP 413). Formats the browser can't
+    // decode (HEIC outside Safari) go up as they are.
+    async function qeShrinkPhoto(file) {
+        try {
+            const img = await createImageBitmap(file, { imageOrientation: 'from-image' });
+            const scale = Math.min(1, 1536 / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff'; // transparent PNG areas would otherwise turn black in the JPEG
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            img.close();
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+            return blob && blob.size < file.size ? new File([blob], 'photo.jpg', { type: 'image/jpeg' }) : file;
+        } catch (e) {
+            return file;
+        }
+    }
+
+    async function doScan() {
         const data = new FormData();
         if (qeMode === 'describe') {
             const description = document.getElementById('qeDescription').value.trim();
             if (!description) { document.getElementById('qeDescription').focus(); return; }
             data.append('action', 'describe');
             data.append('description', description);
-        } else {
-            if (!qeSelectedFile) return;
-            data.append('action', 'scan');
-            data.append('image', qeSelectedFile);
+        } else if (!qeSelectedFile) {
+            return;
         }
 
         document.getElementById('qeScanState').style.display = 'none';
         document.getElementById('qeDescribeState').style.display = 'none';
         document.getElementById('qeScanningState').style.display = '';
+
+        if (qeMode === 'photo') {
+            data.append('action', 'scan');
+            data.append('image', await qeShrinkPhoto(qeSelectedFile));
+        }
 
         fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
             .then(r => r.json())
