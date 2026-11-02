@@ -19,17 +19,18 @@ function spenceConfiguredPath(string $environmentName, string $defaultPath): str
     return spenceAbsolutePath($path, $environmentName);
 }
 
-// Ingredients lives outside the immutable Spence runtime, so its shopping list
-// must be located by absolute path rather than relative to the script.
+// The shopping list belongs to a separate app outside the Spence runtime, so it is
+// located by absolute path. Unset means the handoff is off.
 function spenceIngredientsListPath(): string {
-    return spenceConfiguredPath(
-        'SPENCE_INGREDIENTS_PATH',
-        '/srv/jaaaames.com/ingredients/shopping_list.json'
-    );
+    $configured = getenv('SPENCE_INGREDIENTS_PATH');
+    return ($configured === false || $configured === '')
+        ? ''
+        : spenceAbsolutePath($configured, 'SPENCE_INGREDIENTS_PATH');
 }
 
 function spenceIngredientsEnabled(): bool {
-    return spenceTenant()['primary'] && is_file(spenceIngredientsListPath());
+    $path = spenceIngredientsListPath();
+    return spenceTenant()['primary'] && $path !== '' && is_file($path);
 }
 
 function spenceReadCredential(
@@ -121,7 +122,7 @@ function spenceUploadDir(): string {
 function spenceNanoGptKey(): string {
     $tenant = spenceTenant();
     if ($tenant['primary']) {
-        return spenceReadCredential('NANOGPT_CREDENTIAL_FILE', '/srv/secrets/nanogpt.env', 'NANOGPT_API_KEY');
+        return spenceReadCredential('NANOGPT_CREDENTIAL_FILE', '/etc/spence/nanogpt-key', 'NANOGPT_API_KEY');
     }
     $file = spenceTenantKeyDir() . '/' . $tenant['id'] . '.nanogpt';
     return is_file($file) && is_readable($file) ? trim((string)file_get_contents($file)) : '';

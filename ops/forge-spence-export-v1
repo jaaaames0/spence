@@ -5,6 +5,7 @@ source_db=/var/lib/forge/forge.db
 export_dir=/var/lib/forge/exports
 target=$export_dir/spence-v1.db
 lock_file=$export_dir/.spence-v1.lock
+sqlite3=${SQLITE3:-sqlite3}
 
 test "$#" -eq 0
 test -r "$source_db"
@@ -22,12 +23,12 @@ trap cleanup EXIT
 # smoothed_bf_pct arrives with Forge schema migration v8; publish NULLs until then so
 # the export never goes stale waiting on a Forge deploy.
 smoothed_source=NULL
-if test -n "$(/usr/local/bin/sqlite3 -readonly "$source_db" "SELECT 1 FROM pragma_table_info('body_measurements') WHERE name = 'smoothed_bf_pct';")"; then
+if test -n "$("$sqlite3" -readonly "$source_db" "SELECT 1 FROM pragma_table_info('body_measurements') WHERE name = 'smoothed_bf_pct';")"; then
     smoothed_source=smoothed_bf_pct
 fi
 
-/usr/local/bin/sqlite3 "$temporary" <<SQL
-ATTACH DATABASE 'file:/var/lib/forge/forge.db?mode=ro' AS forge;
+"$sqlite3" "$temporary" <<SQL
+ATTACH DATABASE 'file:$source_db?mode=ro' AS forge;
 PRAGMA main.journal_mode = DELETE;
 PRAGMA main.synchronous = FULL;
 PRAGMA main.user_version = 1;
@@ -82,8 +83,8 @@ COMMIT;
 DETACH DATABASE forge;
 SQL
 
-test "$(/usr/local/bin/sqlite3 -readonly "$temporary" 'PRAGMA main.quick_check;')" = ok
-test "$(/usr/local/bin/sqlite3 -readonly "$temporary" 'PRAGMA main.user_version;')" = 1
+test "$("$sqlite3" -readonly "$temporary" 'PRAGMA main.quick_check;')" = ok
+test "$("$sqlite3" -readonly "$temporary" 'PRAGMA main.user_version;')" = 1
 /usr/bin/chmod 0440 "$temporary"
 /usr/bin/sync -f "$temporary"
 /usr/bin/mv -fT -- "$temporary" "$target"

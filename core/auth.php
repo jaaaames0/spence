@@ -13,7 +13,7 @@ require_once __DIR__ . '/runtime_config.php';
 // FPM master environment; the value fallback is retained for local development.
 $ACCESS_KEY = spenceReadCredential(
     'SPENCE_CREDENTIAL_FILE',
-    '/srv/secrets/spence_credentials.env',
+    '/etc/spence/access-key',
     'SPENCE_ACCESS_KEY'
 );
 if ($ACCESS_KEY === '') {

@@ -1,4 +1,49 @@
-# SPENCE | Changelog
+# Changelog
+
+### Unreleased (2026-09 – 2026-11)
+- **Catalogue-aware scanning:** Receipt lines without an exact name or alias match are matched against the live catalogue by AI. Same-product verdicts restock the existing product and remember the receipt wording, and near matches become merge suggestions with side-by-side macro previews. Catalogue entries carry each product's size so different pack sizes stay distinct. Levenshtein/Jaccard matching remains the fallback.
+- **Faster scans:** Receipt and Quick Eat calls use minimal reasoning. Photos are shrunk in the browser first: receipts to 2048 px, Quick Eat to 1536 px.
+- **Receipt total check:** The model also reads the printed total, and Stock warns when the lines don't add up to it.
+- **Quick Eat:** Added text descriptions ("New Food (Describe)") and WebP/HEIC photos. Scans link to existing catalogue products or add new grocery items, while meals are logged without touching the catalogue.
+- **Spend & wastage:** Every purchase is logged per item. A new *wasted* action records thrown-out value, and hand-lowered quantities count as waste. Waste % appears on the weekly cost card and the dashboard projection.
+- **Dashboard:** Header quick actions (scan receipt, photo Quick Eat), regrouped and clickable cards, source breakdowns, favourite meals and ingredients, and a macro check.
+- **Food leaderboard:** Ranks every food eaten by several metrics, in meal or ingredient mode. Variants can be grouped by type. Cook ranks same-type substitutes first.
+- **Guest tenants:** Guests get their own database, uploads and NanoGPT key, seeded from the product catalogue (`ops/spence-create-tenant.php`).
+- **Type-to-search product pickers** replace dropdowns and datalists. A post-scan spice review lets you move misclassified spice items to the rack.
+- **Log:** The recipe breakdown shows per-ingredient cost and adds up to the logged entry. Per-item history converts to weight when a product moves to kg/L.
+- **FORGE:** Reads a versioned, read-only export instead of FORGE's live database, and uses FORGE's smoothed body fat.
+- **Deployment:** Credentials are read from files, paths are configurable through environment variables, and there is a sample hardened PHP-FPM pool and AppArmor profile in `ops/`. Server crashes are reported as server errors rather than connection problems. AI errors carry the provider's status and message, with an optional debug mode.
+- **Fixes:**
+  - Local days are bucketed with each timestamp's own UTC offset (DST-safe).
+  - Recipe saves resolve ingredients by the picked product id and retire the edited version.
+  - Log edits are costed per lot.
+  - Model and product text is HTML-escaped.
+  - `schema.sql` and `spence_empty.db` are regenerated from the migrations.
+  - Energy calibration estimates are more stable.
+
+### Unreleased (2026-08-23)
+- **Energy Regime Reversals:** Calibration now handles both cut-to-bulk and bulk-to-cut changes. A fresh Forge cycle can optionally provide the phase boundary, refined by SPENCE's sustained intake shift, while the local detector remains the fallback. The first 14 days after a Forge-informed change are explicitly excluded as a water/glycogen transition; calibration begins at the first subsequent weight. The last high-confidence observed maintenance remains the provisional target basis until the new phase reaches high confidence. Formula fallback maintenance uses the latest combined SPENCE/Forge vitals.
+- **Historical Nutrition Plans:** Daily and weekly logs now resolve the goal snapshot effective on the viewed date instead of applying today's plan retrospectively. Existing goal history restores much of the historical timeline; future saves also record the explicit cut/bulk/maintenance regime, maintenance basis, and adjustments.
+- **Regime-Aware Target Zones:** Daily energy indicators now use asymmetric cut, bulk, and maintenance bands. Protein rewards a bounded overshoot, while fat and carbohydrates use broader symmetric ranges; all indicators progress red → orange → green → orange → red.
+- **Nano-GPT Quick Eat:** Photo-based Quick Eat now uses the same Nano-GPT endpoint, key source, Gemini model, and timeout as receipt scanning.
+
+### Unreleased (2026-07-20) - "Quick Eat & Forge Foundations"
+- **Energy Calibration:** Added a historical intake/weight-trend TDEE estimator with coverage and confidence gates. The estimator identifies a confirmed cut → transition → bulk change and calibrates the active phase separately. Settings can opt into calibrated rest/training-day energy targets; Progress shows the read-only calibration summary. Daily Log dates can be excluded when food logging was incomplete.
+- **Unified Active Nutrition Plan:** Settings now presents one plan model: maintenance estimate + daily energy change + optional training-day addition = daily targets. Plan modes are Fat Loss, Maintenance, Lean Gain, High Gain, Dirty Bulk, and Custom. Protein defaults to 1g/lb LBM; High Gain and Dirty Bulk progressively favour fat in the remaining macro energy. Forge activity over the latest 28 days recommends the formula fallback activity rate without overwriting manual choices.
+- **Forge Local Dates:** Forge timestamps are now treated as their stored Australia/Sydney local time, keeping workout-day targets and progress readings on the correct calendar date.
+- **Data Export:** Settings now offers a complete JSON backup plus CSV exports for inventory, consumption, recipes, and vitals.
+- **Expiry Tracking:** Short-life inventory can carry an editable expiry date, source-marked as label-derived or estimated. Receipt vision is constrained to estimate only appropriate perishables, while pantry-stable goods remain untracked. Stock sorting and the dashboard now surface items due within three days.
+- **Recipe Cost Accuracy:** Cooking now deducts from each inventory lot using its own remaining cost basis, so mixed-price stock produces correct cooked-meal and consumption costs.
+- **Receipt Ingest Consolidation:** Live receipt scans and the legacy job bridge now share one transactional ingest service. Item-level failures are retained in the job result instead of being silently discarded.
+- **Database Foundation:** Connection-time schema changes are now versioned migrations rather than repeated exception-driven `ALTER TABLE` calls. Added indexes for consumption history, inventory lookups, recipe ingredients, and vitals, plus a lightweight database regression test (`php tests/test_db_helper.php`).
+- **Quick Eat Corrections:** Photo and existing-product Quick Eat entries now preserve an immutable nutrition snapshot. New Quick Eat entries can be corrected from the daily log without affecting inventory or requiring a Product Master record.
+- **Quick Eat Costing:** Vision analysis now estimates an editable total AUD cost per photo item; existing products use their recorded unit cost. Historical cost is included in daily, weekly, and monthly spend reporting.
+- **Quick Eat Confirmation:** Existing-product Quick Eat now shows the same successful consumption confirmation and macro summary as the photo flow.
+- **Consumption Preview Reset:** Clearing or closing the Eat modal now clears its macro preview, preventing stale values from a previous item being shown.
+- **Weekly Navigation:** Weekly Trends now shares the Daily Log tab-bar layout, with its date selector and period controls grouped at the right.
+- **Inventory Residue Cleanup:** Tiny floating-point quantities left by consumption or recipe deduction are clamped to zero with their residual cost, preventing effectively-empty items from remaining in stock.
+- **Input Quality of Life:** Enter confirms non-form consumption and correction inputs. Search clear controls appear inside populated search fields across the main app surfaces.
+- **FORGE Progress Read:** Progress charts and history now combine local SPENCE vitals with read-only FORGE workout bodyweights and caliper body-fat readings. `FORGE_DB_PATH` supports non-standard Forge database locations.
 
 ### v1.6.0 (2026-04-05) - "Mobile Pass"
 - **Mobile Navigation:** Replaced Bootstrap hamburger with a permanent single-line icon nav on mobile. Each item shows its icon above a centred label — no toggle required. Labels abbreviated (DB, SET) to fit without overflow.
@@ -103,7 +148,7 @@
 
 ### v0.4.0 (2026-02-11)
 - **Unified Product Engine**: Core refactor splitting data into `products` (master nutrition) and `inventory` (physical stock).
-- **The James Constant**: Implemented `weight_per_ea` for accurate macro derivation from unit-based products.
+- **Weight per Item**: Implemented `weight_per_ea` for accurate macro derivation from unit-based products.
 - **Cook Engine v1.0**: Initial launch of the multiplier logic and atomic stock deduction.
 
 ### v0.1.0 (2026-02-09)

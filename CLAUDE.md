@@ -10,7 +10,7 @@ SPENCE is a single-user PHP/SQLite kitchen inventory, recipe, and nutritional lo
 
 No build step. Serve the directory root with PHP-FPM 8.2+ via Nginx/Apache.
 
-**Local dev:** `devserve up spence` serves this working tree at `http://127.0.0.1:8700/spence/` (access key `dev`) against the gitignored `database/spence.db` snapshot, with scanning and the live Ingredients list disabled. See `~/src/devserve/README.md`.
+**Local dev:** from the directory above the checkout, `SPENCE_ACCESS_KEY=dev php -S localhost:8000 -t .` serves the app at `http://localhost:8000/spence/` (the app assumes the `/spence/` path prefix). Host-specific dev and deploy notes, if any, are in the gitignored `CLAUDE.local.md`.
 
 **Database init:**
 ```bash
@@ -20,7 +20,7 @@ chmod 666 database/spence.db
 
 **Receipt ingest** is synchronous — scanning a receipt completes the full pipeline (upload → NanoGPT vision → ingest → merge suggestions) in a single HTTP request via `core/receipt_api.php`; `ingestReceiptItems()` in `core/receipt_ingest.php` maps the JSON to DB inserts. No background service required. Both calls use `reasoning_effort: minimal` (~16 s + ~4 s vs ~40 s, often past the client's 60 s timeout, at the default) and Stock shrinks receipts to 2048 px JPEG first (NanoGPT rejects requests over 4.5 MB, a ~3.4 MB photo, with HTTP 413). The model also returns the printed `receipt_total`; when the items don't add up to it (`receiptTotalMismatch()`, usually prices shifted a line on a rotated or long receipt) Stock shows a check-prices warning. 2026-11-01 benchmark: 12 hand-transcribed receipts. `core/bridge_ingest.php` is a legacy CLI bridge for completed `jobs` rows.
 
-**Credentials** are read from files by `spenceReadCredential()` (`core/runtime_config.php`): the access key from `SPENCE_CREDENTIAL_FILE` (default `/srv/secrets/spence_credentials.env`, production `/etc/spence/access-key`) and the NanoGPT key from `NANOGPT_CREDENTIAL_FILE`. The `SPENCE_ACCESS_KEY` / `NANOGPT_API_KEY` env vars are a local-development fallback only. See `DEPLOYMENT.md`.
+**Credentials** are read from files by `spenceReadCredential()` (`core/runtime_config.php`): the access key from `SPENCE_CREDENTIAL_FILE` and the NanoGPT key from `NANOGPT_CREDENTIAL_FILE`. The `SPENCE_ACCESS_KEY` / `NANOGPT_API_KEY` env vars are a local-development fallback only. See `DEPLOYMENT.md`.
 
 **Tenancy**: the original install is the primary tenant; guests are key files in `SPENCE_TENANTS_DIR` with their own DB and uploads under `SPENCE_TENANT_DATA_DIR/<id>/`. `auth.php` resolves the tenant from the cookie (`<id>.<hmac>` for guests, the original token for the primary) and `spenceTenant()` (`core/runtime_config.php`) supplies its paths to `get_db_connection()` and `spenceUploadDir()`. Guests never get Forge (`getForgeDbConnection()` returns null) or the Ingredients list, and scan with their own `<id>.nanogpt` key via `spenceNanoGptKey()` (none means scanning is off, never the primary's key). Provision with `ops/spence-create-tenant.php`, which seeds the raw product catalogue; see `DEPLOYMENT.md`.
 

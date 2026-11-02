@@ -1,13 +1,13 @@
-# Dedicated Spence PHP-FPM hat, included from the php-fpm parent profile.
+# Example AppArmor hat for the dedicated Spence PHP-FPM pool (apparmor_hat = spence),
+# included from the php-fpm parent profile. Paths follow the example layout in
+# DEPLOYMENT.md; adjust them to yours.
 profile spence {
   include <abstractions/php-worker>
   include <abstractions/nameservice>
   include <abstractions/ssl_certs>
 
-  /srv/jaaaames.com/spence r,
-  /srv/jaaaames.com/spence/** r,
-  /usr/local/lib/spence/ r,
-  /usr/local/lib/spence/** r,
+  /opt/spence/ r,
+  /opt/spence/** r,
 
   /etc/spence/access-key r,
   /etc/spence/nanogpt-key r,
@@ -15,7 +15,7 @@ profile spence {
   /etc/spence/tenants/*.key r,
   /etc/spence/tenants/*.nanogpt r,
 
-  /run/php/php8.3-spence-fpm.sock rw,
+  /run/php/spence-fpm.sock rw,
   @{PROC}/@{pid}/attr/{apparmor/,}current r,
 
   /var/lib/spence/ r,
@@ -47,8 +47,8 @@ profile spence {
   network inet stream,
   network inet6 stream,
 
-  # Confirmed recipe-to-shopping-list handoff. This does not grant access to
-  # Ingredients PHP code, its embedded credential, or directory creation.
-  /srv/jaaaames.com/ingredients/ r,
-  /srv/jaaaames.com/ingredients/shopping_list.json rw,
+  # Optional recipe-to-shopping-list handoff (SPENCE_INGREDIENTS_PATH): the one
+  # file only, with no access to the other app's code or directory creation.
+  /srv/ingredients/ r,
+  /srv/ingredients/shopping_list.json rw,
 }
