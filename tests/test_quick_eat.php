@@ -46,6 +46,14 @@ try {
     assertQuickEat(['meal', 'none'], [$odd['kind'], $odd['master']], 'an unknown kind is treated as a meal');
     assertQuickEat('link', resolveQuickEatMatch($item('meal', 'same', 1), $byId)['master'], 'a meal the model is sure of can still link');
 
+    // Catalogue size labels let the model tell a 30 g bar from a 51 g one.
+    assertQuickEat('30 g each', productSizeLabel('ea', 0.03), 'items show their size');
+    assertQuickEat('51 g each', productSizeLabel('ea', 0.051), 'sizes round to whole grams');
+    assertQuickEat('each', productSizeLabel('ea', 1.0), 'the 1.0 placeholder is not a real size');
+    assertQuickEat('each', productSizeLabel('ea', 0), 'an item with no size says so');
+    assertQuickEat('by weight', productSizeLabel('kg', 1.0), 'weighed products have no item size');
+    assertQuickEat('by weight', productSizeLabel('L', 1.0), 'so do liquids');
+
     echo "Quick Eat tests passed\n";
 } finally {
     $db = null;

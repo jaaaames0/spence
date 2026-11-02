@@ -113,13 +113,13 @@ function matchReceiptItemsWithAi(PDO $db, array $items, callable $complete, stri
     }
     if (!$unknown) return $items;
 
-    $catalogue = $db->query("SELECT id, name, category, base_unit FROM products
+    $catalogue = $db->query("SELECT id, name, category, base_unit, weight_per_ea FROM products
         WHERE merges_into IS NULL AND is_dropped = 0 AND recipe_id IS NULL AND type != 'cooked' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
     $known = array_column($catalogue, null, 'id');
-    $lines = array_map(fn($p) => "{$p['id']} | {$p['name']} | {$p['category']} | {$p['base_unit']}", $catalogue);
+    $lines = array_map(fn($p) => "{$p['id']} | {$p['name']} | {$p['category']} | " . productSizeLabel($p['base_unit'], (float)$p['weight_per_ea']), $catalogue);
     $receipt = [];
     foreach (array_values($unknown) as $i => $item) {
-        $receipt[] = "{$i} | {$item['product']} | {$item['category']} | {$item['unit']} | "
+        $receipt[] = "{$i} | {$item['product']} | {$item['category']} | " . productSizeLabel((string)$item['unit'], (float)($item['weight_per_ea'] ?? 0)) . " | "
             . round((float)$item['kj_per_100']) . " kJ, P " . (float)$item['protein_per_100'] . ", F " . (float)$item['fat_per_100'] . ", C " . (float)$item['carbs_per_100'];
     }
 
@@ -130,8 +130,10 @@ function matchReceiptItemsWithAi(PDO $db, array $items, callable $complete, stri
         . "- 'new': nothing in the catalogue is that product. Use product_id 0.\n"
         . "Different flavours, cuts, fat grades or product types are never 'same' (e.g. '4 Star Beef Mince' vs '3 Star', 'Chicken Breast' vs 'Chicken Thigh', 'Salted Butter' vs 'Unsalted').\n"
         . "Catalogue names put the product type first ('Cheese Slices, Extra Tasty'); receipt names may not.\n\n"
-        . "Catalogue (id | name | category | unit):\n" . implode("\n", $lines) . "\n\n"
-        . "Receipt items (index | name | category | unit | per 100 g):\n" . implode("\n", $receipt) . "\n\n"
+        . "A bigger or smaller pack of the same item is still 'same' (2 L vs 3 L milk), but an item sold by the each in a different size is not "
+        . "(a 30 g protein bar vs a 51 g bar of the same flavour): compare each receipt item's 'g each' with the catalogue's.\n\n"
+        . "Catalogue (id | name | category | size):\n" . implode("\n", $lines) . "\n\n"
+        . "Receipt items (index | name | category | size | per 100 g):\n" . implode("\n", $receipt) . "\n\n"
         . "Return one result per receipt item.";
 
     $request = [

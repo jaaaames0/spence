@@ -25,7 +25,7 @@ try {
         // The catalogue rides along so the model links foods already in it (no second call, no merge step).
         $db = get_db_connection();
         $catalogue = quickEatCatalogue($db);
-        $catalogueLines = array_map(fn($p) => "{$p['id']} | {$p['name']} | {$p['category']}", $catalogue);
+        $catalogueLines = array_map(fn($p) => "{$p['id']} | {$p['name']} | {$p['category']} | " . productSizeLabel($p['base_unit'], (float)$p['weight_per_ea']), $catalogue);
 
         $instructions = "Instructions:\n"
             . "- Kind: 'packaged' for a branded or packaged product (a bar, a drink, a pack of biscuits), 'fresh' for a single whole food "
@@ -40,8 +40,9 @@ try {
             . "- Catalogue match, against the household catalogue below: 'same' only when it is that exact product (same item, variant and flavour; "
             . "wording, word order and a missing brand don't matter), 'similar' when it might be but you can't confirm the variant, flavour or brand, "
             . "otherwise 'new'. Different flavours, cuts or product types are never 'same' ('Chicken Breast' vs 'Chicken Thigh', 'Salted Butter' vs 'Unsalted'). "
-            . "A meal is only 'same' as a catalogue entry for that same dish. Give the entry's id for 'same' and 'similar', 0 for 'new'.\n\n"
-            . "Household catalogue (id | name | category):\n" . ($catalogueLines ? implode("\n", $catalogueLines) : '(empty)') . "\n\n"
+            . "A meal is only 'same' as a catalogue entry for that same dish. Size counts: a 30 g bar is not the same product as a 51 g bar "
+            . "of the same flavour, so use the estimated weight against the catalogue's 'g each'. Give the entry's id for 'same' and 'similar', 0 for 'new'.\n\n"
+            . "Household catalogue (id | name | category | size):\n" . ($catalogueLines ? implode("\n", $catalogueLines) : '(empty)') . "\n\n"
             . "Return ONLY a valid JSON array of objects, one per distinct food item.";
 
         if ($action === 'scan') {

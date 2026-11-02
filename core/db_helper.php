@@ -474,6 +474,15 @@ function productBaseName(string $name): string {
 }
 
 /**
+ * How a product comes, for AI catalogue matching: "30 g each" tells a 30 g bar from a 51 g one
+ * of the same flavour. weight_per_ea is a 1.0 placeholder on products sold by weight.
+ */
+function productSizeLabel(string $unit, float $weightPerEach): string {
+    if ($unit !== 'ea') return 'by weight';
+    return $weightPerEach > 0 && abs($weightPerEach - 1.0) > 0.0001 ? round($weightPerEach * 1000) . ' g each' : 'each';
+}
+
+/**
  * Split $total across keys in proportion to $shares, rounded to $decimals with the largest
  * remainders rounded up, so the rounded parts add up to the rounded total exactly.
  */
