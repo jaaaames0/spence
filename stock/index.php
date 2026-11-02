@@ -377,14 +377,14 @@ include '../core/page_head.php';
 
         // ── Synchronous receipt scan (JPEG/PNG) ──────────────────────────────
         const scanMessages = [
-            'Uploading High-Resolution Scan...',
+            'Uploading Scan...',
             'Analyzing with Vision AI...',
             'Extracting Line Items...',
             'Mapping to Inventory...',
             'Almost there...',
         ];
 
-        function receiptScan(input) {
+        async function receiptScan(input) {
             const file = input.files[0];
             if (!file) return;
             input.value = ''; // Allow re-selecting the same file
@@ -402,7 +402,8 @@ include '../core/page_head.php';
 
             const data = new FormData();
             data.append('action', 'scan_receipt');
-            data.append('receipt', file);
+            // Receipt text is small, so receipts keep more pixels than Quick Eat's 1536
+            data.append('receipt', await shrinkPhoto(file, 2048));
 
             fetch('../core/receipt_api.php', { method: 'POST', body: data })
                 .then(spenceJson)
@@ -416,11 +417,17 @@ include '../core/page_head.php';
                     }
 
                     let notice = res.item_count + ' items ingested.';
+                    // A misread usually shifts prices between lines, which shows up as a total that doesn't add up
+                    const totalWarning = res.total_mismatch
+                        ? `Check prices: the items add up to $${res.total_mismatch.items_sum.toFixed(2)} but the receipt total reads $${res.total_mismatch.printed.toFixed(2)}.`
+                        : '';
+                    if (totalWarning) notice = totalWarning + ' ' + notice;
                     if (res.ai_matches && res.ai_matches.length) notice += ' Matched to existing: ' + res.ai_matches.map(m => `${m.receipt} → ${m.product}`).join(', ') + '.';
                     if (res.spices_restocked && res.spices_restocked.length) notice += ' Spice rack restocked: ' + res.spices_restocked.join(', ') + '.';
-                    statusAlert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + escHtml(notice);
-                    // Survives the reload below so restocked spices aren't a silent change
+                    statusAlert.innerHTML = `<i class="bi bi-${totalWarning ? 'exclamation-triangle' : 'check-circle'} me-2"></i>` + escHtml(notice);
+                    // Survives the reload below so restocked spices and a total mismatch aren't silent
                     sessionStorage.setItem('spenceScanNotice', notice);
+                    if (totalWarning) sessionStorage.setItem('spenceScanWarning', '1');
 
                     setTimeout(() => {
                         if (res.spice_candidates && res.spice_candidates.length) showSpiceReview(res);
@@ -437,9 +444,11 @@ include '../core/page_head.php';
 
         const scanNotice = sessionStorage.getItem('spenceScanNotice');
         if (scanNotice) {
+            const warning = sessionStorage.getItem('spenceScanWarning');
             sessionStorage.removeItem('spenceScanNotice');
+            sessionStorage.removeItem('spenceScanWarning');
             const statusAlert = document.getElementById('statusAlert');
-            statusAlert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + escHtml(scanNotice);
+            statusAlert.innerHTML = `<i class="bi bi-${warning ? 'exclamation-triangle' : 'check-circle'} me-2"></i>` + escHtml(scanNotice);
             statusAlert.classList.remove('d-none');
         }
 

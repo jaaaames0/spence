@@ -191,6 +191,14 @@ try {
     assertSameValue(['consumed' => 9.0, 'wasted' => 3.0, 'spent' => 20.0, 'waste_pct' => 25.0], $summary, 'Waste summary is wrong');
     assertSameValue(1, (int)$db->query("SELECT COUNT(*) FROM waste_log")->fetchColumn(), 'Zero-value waste was recorded');
 
+    // A receipt total that the items don't add up to flags a misread; rounding and an unread total don't
+    $lines = [receiptItem('Carrots', 'Fruit and Veg', ['price' => 3.76]), receiptItem('Strawberries', 'Fruit and Veg', ['price' => 4.99]), receiptItem('Bag', 'Other', ['price' => 0.15])];
+    assertSameValue(null, receiptTotalMismatch(8.90, $lines), 'Matching total was flagged');
+    assertSameValue(null, receiptTotalMismatch(8.91, $lines), 'Rounding difference was flagged');
+    assertSameValue(null, receiptTotalMismatch(0, $lines), 'Unread total was flagged');
+    assertSameValue(null, receiptTotalMismatch(null, $lines), 'Missing total was flagged');
+    assertSameValue(['printed' => 9.98, 'items_sum' => 8.9], receiptTotalMismatch(9.98, $lines), 'Shifted prices were not flagged');
+
     echo "Receipt ingest tests passed\n";
 } finally {
     @unlink($path);

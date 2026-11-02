@@ -78,10 +78,14 @@ try {
         . "Category note: Use 'Spice/Herb' ONLY for single dried spices or herbs sold in a jar or packet for the spice rack (e.g. Ground Cumin, Paprika, Dried Oregano, Black Peppercorns). "
         . "Meal kits, recipe bases, curry/spice pastes, marinades, sauces, stock cubes, gravy, and seasoning sachets for a specific dish (e.g. 'Tikka Masala Meal Kit', 'Taco Seasoning Kit', 'Laksa Paste') are NOT Spice/Herb; use 'Other'.\n\n"
         . "Expiry protocol: Only track short-life fresh food. For fresh refrigerated meat/seafood, milk/yogurt/soft cheese, fresh bread/bakery, and fresh fruit/vegetables: if a clear date is visible on the image, return expiry_kind='label' and expiry_date as YYYY-MM-DD. Otherwise return expiry_kind='estimated' with a conservative estimated_shelf_life_days of 1–60 and expiry_date=''. Return expiry_kind='none', expiry_date='', and estimated_shelf_life_days=0 for frozen, canned, dried, jarred, shelf-stable, coffee, sugar, syrup, sauces, cereal, pasta, oil, and all products likely to last over 60 days.\n\n"
-        . "Return ONLY a valid JSON array of objects.";
+        . "Return ONLY valid JSON: receipt_total is the final TOTAL printed on the receipt (after discounts; 0 if it isn't visible), and items holds one object per item as above.";
 
     $request = [
         'model'    => 'google/gemini-3.7-flash',
+        // Minimal answers in ~16 s instead of ~30-40 s (often over the client's 60 s timeout) and read
+        // 11 of 12 test receipts as well as the default (2026-11-01 benchmark). Its misreads, prices shifted
+        // a line on a rotated receipt, are caught by the receipt_total check below.
+        'reasoning_effort' => 'minimal',
         'messages' => [[
             'role'    => 'user',
             'content' => [
@@ -95,28 +99,36 @@ try {
                 'name'   => 'receipt_items',
                 'strict' => true,
                 'schema' => [
-                    'type'  => 'array',
-                    'items' => [
-                        'type'       => 'object',
-                        'properties' => [
-                            'product'         => ['type' => 'string'],
-                            'amount'          => ['type' => 'number'],
-                            'unit'            => ['type' => 'string', 'enum' => ['kg', 'L', 'ea']],
-                            'price'           => ['type' => 'number'],
-                            'weight_per_ea'   => ['type' => 'number'],
-                            'location'        => ['type' => 'string', 'enum' => ['Pantry', 'Fridge', 'Freezer']],
-                            'category'        => ['type' => 'string', 'enum' => ['Proteins', 'Dairy', 'Bread', 'Fruit and Veg', 'Cereals/Grains', 'Snacks/Confectionary', 'Drinks', 'Spice/Herb', 'Other']],
-                            'kj_per_100'      => ['type' => 'number'],
-                            'protein_per_100' => ['type' => 'number'],
-                            'fat_per_100'     => ['type' => 'number'],
-                            'carbs_per_100'   => ['type' => 'number'],
-                            'expiry_kind'     => ['type' => 'string', 'enum' => ['label', 'estimated', 'none']],
-                            'expiry_date'     => ['type' => 'string'],
-                            'estimated_shelf_life_days' => ['type' => 'integer'],
+                    'type' => 'object',
+                    'properties' => [
+                        'receipt_total' => ['type' => 'number'],
+                        'items' => [
+                            'type'  => 'array',
+                            'items' => [
+                                'type'       => 'object',
+                                'properties' => [
+                                    'product'         => ['type' => 'string'],
+                                    'amount'          => ['type' => 'number'],
+                                    'unit'            => ['type' => 'string', 'enum' => ['kg', 'L', 'ea']],
+                                    'price'           => ['type' => 'number'],
+                                    'weight_per_ea'   => ['type' => 'number'],
+                                    'location'        => ['type' => 'string', 'enum' => ['Pantry', 'Fridge', 'Freezer']],
+                                    'category'        => ['type' => 'string', 'enum' => ['Proteins', 'Dairy', 'Bread', 'Fruit and Veg', 'Cereals/Grains', 'Snacks/Confectionary', 'Drinks', 'Spice/Herb', 'Other']],
+                                    'kj_per_100'      => ['type' => 'number'],
+                                    'protein_per_100' => ['type' => 'number'],
+                                    'fat_per_100'     => ['type' => 'number'],
+                                    'carbs_per_100'   => ['type' => 'number'],
+                                    'expiry_kind'     => ['type' => 'string', 'enum' => ['label', 'estimated', 'none']],
+                                    'expiry_date'     => ['type' => 'string'],
+                                    'estimated_shelf_life_days' => ['type' => 'integer'],
+                                ],
+                                'required'             => ['product', 'amount', 'unit', 'price', 'weight_per_ea', 'location', 'category', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100', 'expiry_kind', 'expiry_date', 'estimated_shelf_life_days'],
+                                'additionalProperties' => false
+                            ]
                         ],
-                        'required'             => ['product', 'amount', 'unit', 'price', 'weight_per_ea', 'location', 'category', 'kj_per_100', 'protein_per_100', 'fat_per_100', 'carbs_per_100', 'expiry_kind', 'expiry_date', 'estimated_shelf_life_days'],
-                        'additionalProperties' => false
-                    ]
+                    ],
+                    'required' => ['receipt_total', 'items'],
+                    'additionalProperties' => false,
                 ]
             ]
         ]
@@ -124,8 +136,10 @@ try {
 
     $content = spenceNanoGptChatCompletion($api_key, $request);
 
-    $items = spenceNanoGptDecodeJson($content, $request['model']);
+    $decoded = spenceNanoGptDecodeJson($content, $request['model']);
+    $items = $decoded['items'] ?? null;
     if (!is_array($items) || empty($items)) throw new Exception("Could not parse AI response.");
+    $totalMismatch = receiptTotalMismatch($decoded['receipt_total'] ?? null, $items);
 
     // Write job record for audit trail, then ingest inline
     $db = get_db_connection();
@@ -155,6 +169,7 @@ try {
         'spices_restocked' => array_values(array_unique($spicesRestocked)),
         'ai_matches'       => array_map(fn($from, $to) => ['receipt' => $from, 'product' => $to], array_keys($aiMatches), $aiMatches),
         'ai_matching'      => $matched !== null,
+        'total_mismatch'   => $totalMismatch,
     ]);
 
 } catch (Exception $e) {

@@ -244,3 +244,28 @@ function takeHandoffFile() {
         .then(file => spenceFileStore('readwrite', store => store.delete('pending')).then(() => file || null))
         .catch(() => null);
 }
+
+/**
+ * Shrink a photo to a JPEG at most maxEdge px on its long side before upload. Phone photos are
+ * 2-6 MB: Gemini downscales them itself, so the model sees no more detail, a full-size upload is
+ * slower, and NanoGPT rejects requests over 4.5 MB (a ~3.4 MB JPEG) with HTTP 413. Formats the
+ * browser can't decode (HEIC outside Safari) go up as they are.
+ */
+async function shrinkPhoto(file, maxEdge) {
+    try {
+        const img = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; // transparent PNG areas would otherwise turn black in the JPEG
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        img.close();
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+        return blob && blob.size < file.size ? new File([blob], 'photo.jpg', { type: 'image/jpeg' }) : file;
+    } catch (e) {
+        return file;
+    }
+}

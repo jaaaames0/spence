@@ -77,6 +77,18 @@ function mergeInventoryExpiry(array $existing, array $incoming): array {
 }
 
 /** A live or merged product row by current name or a name it had before a rename or merge. */
+/**
+ * The total printed on the receipt vs the sum of the extracted item prices, when they differ by more
+ * than rounding. Misreads of long or angled receipts usually shift prices between lines, which shows
+ * up here. A missing or zero printed total (unreadable, cut off) is not a mismatch.
+ */
+function receiptTotalMismatch(mixed $printedTotal, array $items): ?array {
+    $printed = round((float)$printedTotal, 2);
+    if ($printed <= 0) return null;
+    $sum = round(array_sum(array_map(fn($item) => (float)($item['price'] ?? 0), $items)), 2);
+    return abs($sum - $printed) > 0.02 ? ['printed' => $printed, 'items_sum' => $sum] : null;
+}
+
 function findProductByName(PDO $db, string $name): ?array {
     $stmt = $db->prepare("SELECT id, name, merges_into, is_dropped FROM products WHERE LOWER(name) = LOWER(?) LIMIT 1");
     $stmt->execute([$name]);
@@ -124,8 +136,9 @@ function matchReceiptItemsWithAi(PDO $db, array $items, callable $complete, stri
 
     $request = [
         'model' => $model,
-        // Low effort answers in ~5 s instead of ~20 s with the same 'same' verdicts in testing
-        'reasoning_effort' => 'low',
+        // Minimal answers in ~4 s (vs ~20 s at the default); same verdicts as low in a 2026-11-01
+        // benchmark, with a tighter tail (p90 7 s vs 13 s) at ~60% of the cost
+        'reasoning_effort' => 'minimal',
         'messages' => [['role' => 'user', 'content' => $prompt]],
         'response_format' => ['type' => 'json_schema', 'json_schema' => [
             'name' => 'catalogue_matches', 'strict' => true,
