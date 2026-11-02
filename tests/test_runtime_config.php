@@ -37,11 +37,16 @@ try {
     putenv('SPENCE_INGREDIENTS_PATH=' . $credentialPath . '.missing');
     assertSameValue(false, spenceIngredientsEnabled(), 'missing Ingredients list disables integration');
     putenv('SPENCE_INGREDIENTS_PATH');
-    assertSameValue(
-        '/srv/jaaaames.com/ingredients/shopping_list.json',
-        spenceIngredientsListPath(),
-        'default Ingredients list is absolute, not runtime-relative'
-    );
+    assertSameValue('', spenceIngredientsListPath(), 'unset Ingredients list path');
+    assertSameValue(false, spenceIngredientsEnabled(), 'unset Ingredients list disables integration');
+    putenv('SPENCE_INGREDIENTS_PATH=relative/shopping_list.json');
+    try {
+        spenceIngredientsListPath();
+        throw new RuntimeException('relative Ingredients list path was accepted');
+    } catch (InvalidArgumentException $expected) {
+        // Expected.
+    }
+    putenv('SPENCE_INGREDIENTS_PATH');
 
     $cookie = spenceAuthCookieOptions(12345);
     assertSameValue('/spence/', $cookie['path'], 'cookie scope');

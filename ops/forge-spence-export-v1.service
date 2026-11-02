@@ -6,8 +6,8 @@ ConditionPathIsDirectory=/var/lib/forge/exports
 
 [Service]
 Type=oneshot
-User=forge-web
-Group=forge-web
+User=forge
+Group=forge
 UMask=0027
 ExecStart=/usr/local/libexec/forge-spence-export-v1
 
@@ -25,7 +25,7 @@ ProtectSystem=strict
 ReadWritePaths=/var/lib/forge
 ReadOnlyPaths=/var/lib/forge/forge.db
 ReadOnlyPaths=-/var/lib/forge/forge.db-wal
-InaccessiblePaths=/var/lib/spence /srv/secrets
+InaccessiblePaths=/var/lib/spence
 RestrictAddressFamilies=AF_UNIX
 RestrictNamespaces=yes
 RestrictRealtime=yes

@@ -1,13 +1,28 @@
-# Forge integration contract
+# FORGE integration
 
-Spence consumes a versioned, read-only projection of Forge data. Production
-must not open Forge's live WAL database, because doing so couples the Spence
-identity to Forge's writable SQLite sidecars and exposes unrelated Forge data.
+FORGE is a companion workout and body-composition tracker. When it's available, SPENCE reads from it:
 
-## Version 1
+- **Bodyweight** logged with workouts, and **body fat** (smoothed, falling back to calipers), shown on Progress and used by energy calibration.
+- **Workout days**, for training-day energy targets and the formula's activity-rate suggestion.
+- **Training cycles** (cut/bulk), as phase boundaries for energy calibration.
 
-The publisher atomically replaces `/var/lib/forge/exports/spence-v1.db`. The
-version 1 contract contains only the tables and columns used by Spence:
+The integration is optional and read-only, and SPENCE never writes to FORGE. Without it, SPENCE uses its own weigh-ins and phase detection. Guest tenants never see FORGE data.
+
+## How SPENCE finds the data
+
+`getForgeExportPath()` in `core/forge.php` looks in three places, in order:
+
+1. `FORGE_DB_PATH`, if set. This must be a version 1 export (see below).
+2. `/var/lib/forge/exports/spence-v1.db`, if readable. This is also a version 1 export.
+3. `../forge/database/forge.db`, a sibling FORGE checkout's live database. This is for local development only.
+
+An export is rejected if its schema version is unsupported, or if it's older than `FORGE_EXPORT_MAX_AGE_SECONDS` (default 300, minimum 60). SPENCE then behaves as if FORGE weren't there.
+
+In production, SPENCE should read a published export rather than FORGE's live database. Reading the live write-ahead-log (WAL) database would tie SPENCE's process to FORGE's writable SQLite sidecar files, and would expose FORGE data that SPENCE doesn't need.
+
+## Version 1 export
+
+The export contains only what SPENCE uses:
 
 - `workouts(started_at, finished_at, type, bodyweight_kg)`
 - `body_measurements(measured_at, caliper_bf_pct, smoothed_bf_pct)`
@@ -15,43 +30,37 @@ version 1 contract contains only the tables and columns used by Spence:
 - `training_cycles(era_id, cycle_type, starts_at, ends_at, source, confidence)`
 - `forge_export_metadata(schema_version, exported_at_utc)`
 
-`smoothed_bf_pct` is Forge's smoothed body fat (Navy and caliper series averaged,
-stored by Forge schema migration v8). It was added compatibly: the publisher
-writes NULLs while Forge lacks the column, and Spence falls back to
-`caliper_bf_pct` for NULLs or for exports built before the column existed.
+`smoothed_bf_pct` was added compatibly. The publisher writes NULLs when FORGE's database predates the column, and SPENCE falls back to `caliper_bf_pct` for NULLs and for older exports.
 
-The export is built in one SQLite read transaction, checked, synced, made
-read-only, and renamed over the prior export. An in-flight request can finish
-against the old inode; the next request opens the new immutable export.
+## Publishing the export
 
-The publisher is a separate locked `forge-web` process with no network access.
-Its systemd sandbox makes the source database and WAL read-only, permits the
-SQLite shared-memory coordination file, and allows writes only within Forge's
-own state tree. The web-facing Spence identity receives read access to the
-published file, not permission to execute or control the publisher.
+[`ops/forge-spence-export-v1`](../ops/forge-spence-export-v1) builds the export:
 
-Spence rejects an unsupported schema or an export older than five minutes and
-falls back to its existing local-data behaviour. Publication normally runs
-once per minute, so a newly started workout or saved body-composition reading
-can take approximately one minute to affect Spence.
+1. It reads FORGE's database in a single SQLite read transaction.
+2. It checks the result, syncs it to disk and makes it read-only.
+3. It renames the file over the previous export.
+
+A request already in flight finishes against the old file, and the next request opens the new one.
+
+The sample systemd [service](../ops/forge-spence-export-v1.service) and [timer](../ops/forge-spence-export-v1.timer) run the publisher once a minute as FORGE's own user, with no network access. The source database is read-only to it, and it can write only to FORGE's state directory. SPENCE's PHP user needs read access to the published file and nothing else. Expect changes in FORGE to show up in SPENCE within about a minute.
+
+The script reads `/var/lib/forge/forge.db` and writes to `/var/lib/forge/exports`, and runs as a `forge` user; adjust these to your FORGE install.
+
+To check an export against its source, run `php ops/validate-forge-export-v1.php` as a user that can read both databases. It compares row counts and deterministic hashes, and prints no body-composition, workout or cycle values.
 
 ## Extending the contract
 
-Do not grant Spence access to the live Forge database to add a feature. For a
-compatible additive field, extend the publisher and consumer tests together.
-For a larger or breaking integration—such as exercise/set/rep data used to
-estimate workout energy—publish `spence-v2.db` alongside version 1:
+To give SPENCE more FORGE data, extend the export; don't open the live database.
 
-1. document the exact new fields and purpose;
-2. add only those projections to a version 2 publisher;
-3. deploy a Spence consumer that accepts and tests version 2;
-4. compare version 1 and version 2 results for their shared behaviours;
-5. switch Spence to version 2 under rollback;
-6. retire version 1 only after acceptance.
+For a compatible, additive field, update the publisher and SPENCE's consumer, and their tests, together.
 
-Parallel versions avoid a lock-step deployment and keep new Forge tables
-private unless a reviewed Spence workflow genuinely needs them.
+For a larger or breaking change, such as using exercise and set data to estimate workout energy, publish a `spence-v2.db` alongside version 1:
 
-Run `php ops/validate-forge-export-v1.php` as an identity that can read both
-databases to compare row counts and deterministic hashes. It deliberately does
-not print body-composition values, workout details, or cycle dates.
+1. Document the new fields and what they're for.
+2. Add only those projections to a version 2 publisher.
+3. Ship a SPENCE consumer that accepts version 2, with tests.
+4. Compare the version 1 and version 2 results where they overlap.
+5. Switch SPENCE to version 2, with a way to roll back.
+6. Retire version 1 once version 2 is accepted.
+
+Running both versions side by side avoids a lock-step deploy and keeps new FORGE tables private until a SPENCE feature genuinely needs them.

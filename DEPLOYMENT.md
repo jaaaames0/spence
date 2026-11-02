@@ -1,110 +1,143 @@
-# Deployment layout
+# Deployment
 
-Spence is developed in this repository, but the website does not execute code
-from this working tree.
+This guide covers running SPENCE as a long-lived service behind Nginx or Apache with PHP-FPM. For a quick local trial, see the [quick start](README.md#quick-start-local).
 
-- Editable source: `/home/james/src/spence`
-- Versioned runtime: `/usr/local/lib/spence/RELEASE`
-- Public compatibility path: `/srv/jaaaames.com/spence`
-- Mutable database: `/var/lib/spence/spence.db`
-- Mutable uploads: `/var/lib/spence/uploads`
-- Dedicated-pool credentials: `/etc/spence/access-key` and
-  `/etc/spence/nanogpt-key`
-- Read-only Forge integration: `/var/lib/forge/exports/spence-v1.db`
+## Requirements
 
-The runtime is created from a clean Git archive and is owned by root. Its live
-database and uploads entries are symlinks to `/var/lib/spence`; they must never
-be copied into Git or edited below `/srv` or `/usr/local/lib`.
+- PHP 8.2+ (FPM) with `pdo_sqlite`, `curl` and `fileinfo`.
+- Nginx or Apache, serving HTTPS. The auth cookie is `Secure`, so logins will not stick over plain HTTP.
+- A NanoGPT API key, if you want receipt and Quick Eat scanning.
 
-`SPENCE_DB_PATH`, `SPENCE_UPLOAD_DIR`, `SPENCE_CREDENTIAL_FILE`,
-`NANOGPT_CREDENTIAL_FILE`, `SPENCE_INGREDIENTS_PATH`, and `FORGE_DB_PATH`
-provide non-secret absolute paths for tests and the dedicated PHP-FPM pool.
-Production uses a versioned, atomically published Forge projection; see
-`docs/FORGE-INTEGRATION.md`. `FORGE_EXPORT_MAX_AGE_SECONDS` may raise the
-default five-minute stale-export threshold, but must not be set below 60.
+SPENCE is served under the URL path `/spence/`. Navigation, asset links and the auth cookie path all assume that prefix.
 
-The legacy `/srv/secrets` credential defaults remain only to make the source
-preparation release safe on the shared pool before cutover. The dedicated pool
-must set the `/etc/spence` paths explicitly. Credential values must not be put
-in FPM environment variables.
+## Layout
 
-NanoGPT failures always return the provider's HTTP status and error message.
-For temporary deeper diagnostics, set `env[SPENCE_AI_DEBUG] = 1` in the active
-Spence PHP-FPM pool and reload PHP-FPM. Error JSON will then also include the
-model, encoded request size, request timing, finish/refusal reason, and at most
-2,000 bytes of the provider response. Return it to `0` after diagnosis; debug
-output may contain model-generated receipt or food text, but never the API key
-or uploaded image.
+Keep code and state apart, so a release can be replaced without touching your data:
 
-The retained recipe **Get Ingredients** workflow is the sole Spence-to-
-Ingredients write. The dedicated identity receives `rw` access to exactly
-`/srv/jaaaames.com/ingredients/shopping_list.json` through a narrow bridge
-group; it receives no access to Ingredients PHP or credentials and no directory
-create/delete permission.
+| What | Example location | Configured by |
+|---|---|---|
+| Application code (read-only to PHP) | `/opt/spence` | web server root / alias |
+| Database (read-write) | `/var/lib/spence/spence.db` | `SPENCE_DB_PATH` |
+| Uploads (read-write) | `/var/lib/spence/uploads` | `SPENCE_UPLOAD_DIR` |
+| Access key (one line) | `/etc/spence/access-key` | `SPENCE_CREDENTIAL_FILE` |
+| NanoGPT key (one line) | `/etc/spence/nanogpt-key` | `NANOGPT_CREDENTIAL_FILE` |
 
-The current host has a known PHP CLI loader conflict with
-`/usr/local/lib/libsqlite3.so.0`. Until that separate package issue is repaired,
-run the tests with the system library selected explicitly:
+Without `SPENCE_DB_PATH` / `SPENCE_UPLOAD_DIR`, SPENCE uses `database/spence.db` and `uploads/` inside the checkout. The PHP user then needs write access to both directories; SQLite also writes `-wal` and `-shm` files next to the database.
+
+Create the database from the blank template. Migrations in `get_db_connection()` bring any older database up to date on first connect.
 
 ```bash
-LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu php tests/test_db_helper.php
-LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu php tests/test_energy_calibration.php
+install -d -m 0750 /var/lib/spence /var/lib/spence/uploads
+cp database/spence_empty.db /var/lib/spence/spence.db
+chown -R www-data:www-data /var/lib/spence     # your PHP-FPM user
 ```
 
-## Deploying
+## Credentials
 
-Code-only changes are fast-lane deploys (`/home/james/AGENTS.md`, host handbook
-§9.1). Commit, then:
+Each key lives alone on one line in a file readable by the PHP-FPM user and nobody else:
 
 ```bash
-fastdeploy spence             # tests, build, PHP lint, SQLite snapshot, switch, reload
-fastdeploy spence --status
-fastdeploy spence --rollback  # back to the previous release
+install -d -m 0750 -g www-data /etc/spence
+openssl rand -base64 24 | install -m 0640 -g www-data /dev/stdin /etc/spence/access-key
+printf '%s\n' 'YOUR-NANOGPT-KEY' | install -m 0640 -g www-data /dev/stdin /etc/spence/nanogpt-key
 ```
 
-`/srv/jaaaames.com/spence` links to `/usr/local/lib/spence/current`, which links to
-the release. `fastdeploy` exports an allowlist of tracked runtime paths (see
-`/home/james/src/fastdeploy/projects/spence.conf`) into a new root-owned release,
-recreates the state symlinks, takes a consistent SQLite snapshot under
-`/data/security-backups/fastdeploy/spence`, switches `current`, reloads
-`php8.3-fpm`, and switches back if `https://jaaaames.com/spence/` stops
-answering. A new top-level runtime directory must be added to that allowlist.
+Pass only the *paths* to PHP. Credential values should not go in the FPM environment. The `SPENCE_ACCESS_KEY` / `NANOGPT_API_KEY` environment variables exist only as a development fallback. With no access key at all, SPENCE answers every request with HTTP 503.
 
-Use the full procedure (checkpoint, timed rollback, operator acceptance) for
-changes to the PHP-FPM pool, AppArmor hat, credentials, nginx, or a schema
-change the previous release cannot read.
+## PHP-FPM
+
+A dedicated pool keeps SPENCE's permissions separate from other sites. A minimal pool:
+
+```ini
+[spence]
+user = spence
+group = spence
+listen = /run/php/spence-fpm.sock
+listen.owner = www-data
+listen.group = www-data
+
+pm = ondemand
+pm.max_children = 4
+request_terminate_timeout = 130s   ; a receipt scan is one long request
+clear_env = yes
+
+env[SPENCE_DB_PATH] = /var/lib/spence/spence.db
+env[SPENCE_UPLOAD_DIR] = /var/lib/spence/uploads
+env[SPENCE_CREDENTIAL_FILE] = /etc/spence/access-key
+env[NANOGPT_CREDENTIAL_FILE] = /etc/spence/nanogpt-key
+
+php_admin_value[upload_max_filesize] = 12M
+php_admin_value[post_max_size] = 12M
+```
+
+Photos are shrunk in the browser before upload: receipts to 2048 px and Quick Eat to 1536 px JPEG. Uploads therefore stay small, but the upload limits still need to allow a few megabytes.
+
+[`ops/php-fpm-spence.conf`](ops/php-fpm-spence.conf) is a fuller hardened example, with an AppArmor hat in [`ops/apparmor-php-fpm-spence`](ops/apparmor-php-fpm-spence). Both follow the layout above (code in `/opt/spence`), so adjust them if yours differs. [`ops/spence-isolation-probe.php`](ops/spence-isolation-probe.php) checks a running pool's isolation; see its header for how to run it.
+
+## Web server
+
+Nginx, with the checkout (or a release directory) at `/opt/spence`:
+
+```nginx
+location /spence/ {
+    alias /opt/spence/;
+    index index.php;
+
+    location ~ ^/spence/(database|ops|tests|uploads)/ { deny all; }
+    location ~ /\.            { deny all; }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $request_filename;
+        fastcgi_pass unix:/run/php/spence-fpm.sock;
+    }
+}
+```
+
+Never serve the `database/`, `ops/` or `tests/` directories, or dotfiles. If the database and uploads live outside the code directory, as above, they are never reachable over HTTP anyway.
+
+## Upgrading
+
+1. Back up the database with `sqlite3 /var/lib/spence/spence.db ".backup /path/to/backup.db"`. That command is safe while the app is running.
+2. Replace the code, for example with `git pull` or by unpacking a `git archive` of the new release into a fresh directory and switching a symlink.
+3. Reload PHP-FPM.
+
+Schema migrations run automatically on the next request. A schema change that the previous release can't read makes rolling back the code alone unsafe; restore the backup as well.
+
+## Diagnostics
+
+AI errors always report the provider's HTTP status and message. For deeper diagnostics, set `env[SPENCE_AI_DEBUG] = 1` in the pool and reload. Error replies then also include the model, request size and timing, finish or refusal reason, and up to 2,000 bytes of the provider's response. Turn it back off afterwards. The output never contains the API key or the image, but it can contain model-generated receipt or food text.
 
 ## Guest tenants
 
-The original install is the primary tenant: `/var/lib/spence/spence.db`,
-`/etc/spence/access-key`, Forge and the Ingredients list, unchanged. Each guest
-is a key file `/etc/spence/tenants/<id>.key` with its own database and uploads
-under `/var/lib/spence/tenants/<id>/`. Guests never read Forge or write the
-Ingredients list. Each guest scans with its own NanoGPT key,
-`/etc/spence/tenants/<id>.nanogpt` (`0640 root:spence-web`), so spend and
-per-key limits are separate. Without that file the guest's scanning is off;
-it never falls back to the primary key. The login
-form tries every key, so each key must be unique; a guest key equal to the
-primary's logs in as the primary.
+Besides the primary user, SPENCE can host guests. Each guest has their own database, uploads and NanoGPT key. Guests never see FORGE data or the shopping-list handoff.
 
-The first guest, and the pool/AppArmor change, go through the kit
-`~/optiplex/changes/2026-10-30-spence-guest-tenants`. Adding a guest is an operator change, not a fast-lane deploy: the pool needs
-`SPENCE_TENANTS_DIR` / `SPENCE_TENANT_DATA_DIR` and the AppArmor hat the
-tenant paths (both in `ops/`), and the tenant databases need backing up.
+| What | Location |
+|---|---|
+| Guest access key | `$SPENCE_TENANTS_DIR/<id>.key` (default dir `/etc/spence/tenants`) |
+| Guest NanoGPT key (optional) | `$SPENCE_TENANTS_DIR/<id>.nanogpt` |
+| Guest database and uploads | `$SPENCE_TENANT_DATA_DIR/<id>/` (default `/var/lib/spence/tenants`) |
+
+Create a guest, seeding their product catalogue from a snapshot of yours:
 
 ```bash
-# from the source checkout; seeds from a snapshot of the live catalogue
-sudo -u spence-web sqlite3 /var/lib/spence/spence.db ".backup /var/lib/spence/tmp/seed.db"
-sudo SPENCE_TENANT_DATA_DIR=/var/lib/spence/tenants LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu \
-  php ops/spence-create-tenant.php <id> --seed-from /var/lib/spence/tmp/seed.db
-sudo chown -R spence-web:spence-web /var/lib/spence/tenants
-sudo rm /var/lib/spence/tmp/seed.db
+sqlite3 /var/lib/spence/spence.db ".backup /tmp/seed.db"
+SPENCE_TENANT_DATA_DIR=/var/lib/spence/tenants \
+  php ops/spence-create-tenant.php alice --seed-from /tmp/seed.db
+chown -R spence:spence /var/lib/spence/tenants/alice
+rm /tmp/seed.db
 
-sudo install -d -o root -g spence-web -m 0750 /etc/spence/tenants
-openssl rand -base64 18 | sudo install -o root -g spence-web -m 0640 /dev/stdin /etc/spence/tenants/<id>.key
+openssl rand -base64 18 | install -m 0640 -g spence /dev/stdin /etc/spence/tenants/alice.key
 ```
 
-The seed copies raw, live products (macros, units, last unit cost; `--no-prices`
-zeroes the cost) with their receipt aliases, spice aliases and dismissed dedupe
-pairs. Nothing personal is copied. Revoke a guest by deleting the key file;
-rotating it logs out only that guest's devices.
+The seed copies only raw, live products: macros, units and last unit cost (`--no-prices` zeroes the cost), plus their receipt aliases, spice aliases and dismissed dedupe pairs. Stock, logs, recipes and profile are never copied.
+
+- **Scanning:** without an `<id>.nanogpt` file, scanning is off for that guest. It never falls back to the primary key.
+- **Unique keys:** the login form tries every key, so each one must be unique.
+- **Revoking:** delete the guest's key file. Rotating the key logs out only that guest's devices.
+- **Backups:** back up the tenant databases alongside the primary one.
+
+## Optional integrations
+
+- **FORGE:** see [docs/FORGE-INTEGRATION.md](docs/FORGE-INTEGRATION.md). Point `FORGE_DB_PATH` at the published read-only export.
+- **Shopping list:** recipe *Get Ingredients* appends missing items to an external JSON shopping list at `SPENCE_INGREDIENTS_PATH`; the button is hidden while that is unset or the file doesn't exist. It is the only thing SPENCE writes outside its own state. Grant read-write on that one file and nothing else.

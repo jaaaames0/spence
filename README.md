@@ -1,132 +1,144 @@
 # SPENCE
-### AI-Powered Kitchen Inventory, Recipe Database & Nutritional Logger
 
-SPENCE harnesses AI vision to parse grocery receipts — automatically sorting, categorising, and tracking your nutrition from shopping cart to pantry, fridge or freezer, to stovetop, and onwards as you use it to fuel your daily targets.
+**A self-hosted kitchen inventory, recipe database and nutrition log, with AI receipt and food scanning.**
 
-> ⚠️ **Caution:** Designed for local-first, single-user personal use. Not hardened for public internet exposure. Set your own access key (see Installation) before putting this anywhere near a network.
+Photograph a grocery receipt and SPENCE stocks your pantry, fridge and freezer with clean product names, prices and macro estimates. Cook recipes from that stock, log what you eat, and track energy, protein and spend against a nutrition plan calibrated from your own intake and weight trend.
+
+SPENCE is a single PHP application backed by one SQLite file. It is built for one person (plus optional guest accounts) on hardware they control.
+
+> [!WARNING]
+> SPENCE is designed for local-first personal use and has not been hardened for exposure to the public internet. Keep it behind HTTPS, set a strong access key, and prefer a private network or VPN.
 
 ---
 
 ## Features
 
-- **One-tap receipt ingestion** — AI vision parses your grocery receipt and extracts clean product names, quantities, prices, and macronutrient profiles. Runs synchronously in a single HTTP request; no background service required.
-- **Spice Rack** — Binary on/off pantry staple tracking for 18 canonical spices. Usage counter flags restocks at 40 uses. Integrated across Stock, RecipeDB, and Cook.
-- **Smart deduplication** — Jaccard similarity + category locking detects and merges duplicate or near-duplicate products (e.g. "Full Cream Milk" vs "Whole Milk") with averaged cost basis tracking.
-- **Ghost Recipe Engine** — Cook with substitutions or custom quantities without touching the master recipe. Forks are fingerprinted, stored silently as inactive ghosts, and resolved back to the canonical name in logs and analytics.
-- **Live Cook macros** — kJ, protein, and $/serve badges update in real time as quantities and substitutions change during a cook.
-- **Recipe builder** — Build recipes from inventory with per-serve energy, protein, fat, carb and cost breakdowns. Live macro preview as you add ingredients.
-- **Cook & consume workflow** — Execute a recipe and SPENCE automatically deducts ingredients from stock, logs consumed servings, and stores leftovers as Meal Prep.
-- **Intelligence Dashboard** — Live 4×2 home screen: today's energy/protein vs goals, pantry value, monthly spend projection, 7-day kJ trend (Chart.js), top 3 energy and protein sources (30d), and favourite meal (30d).
-- **Nutritional logging** — Daily and weekly macro tracking with charts, compared against personalised targets. Ghost fork names resolve to canonical parent recipes.
-- **Personalised targets** — Katch-McArdle TDEE calculation from lean body mass; proportional macro rebalancer; training/rest mode coming in v2.0.
-- **Weight & body fat tracking** — Graphical progress view over time.
-- **Product master** — Edit names, categories, macros and per-unit weights; deduplicate your product list; add products manually for use in recipes.
-- **PWA** — Installable as a home screen app. HMAC cookie auth survives session GC wipes (1-year token).
-- **Mobile-first UI** — Fully usable on phone: icon nav bar, collapsible table rows, responsive card grids, touch-friendly section headers.
+**Stock**
+- **Receipt scanning.** A vision model reads a receipt photo and returns product names, quantities, prices, categories, macros per 100 g, per-item weights and expiry estimates for perishables. The whole pipeline runs in one HTTP request, with no background worker.
+- **Catalogue matching.** New receipt lines are matched against your existing products by AI, with a Levenshtein/Jaccard fallback. Exact matches restock the existing product and remember the receipt wording. Near matches become merge suggestions you review side by side.
+- **Receipt total check.** If the scanned lines don't add up to the printed total, you're warned to check prices.
+- **Expiry tracking.** Short-life items carry an expiry date, and the dashboard and Stock page surface whatever is due within three days.
+- **Spend and waste.** Every purchase is logged, and the *wasted* action records the value thrown out. Waste is reported as a share of what you consumed plus what you wasted.
+- **Spice rack.** On/off tracking for pantry staples, with a restock flag after 40 uses. Spices on a receipt are routed to the rack automatically.
+
+**Eat**
+- **Eat from stock** by weight, unit or a fraction of what's on hand.
+- **Quick Eat** logs food that didn't come from inventory. You can photograph it, describe it in words, or pick an existing product. Scans are matched to your catalogue, so packaged items link to the real product and price.
+
+**Cook**
+- **Recipe builder** with live per-serve energy, protein, fat, carbs and cost.
+- **Cooking** deducts each ingredient from stock at its own cost basis, logs the serves you eat now, and stores the rest as Meal Prep.
+- **Substitutions on the fly.** Swap an ingredient or change an amount while cooking without touching the saved recipe. SPENCE records the variant as a hidden fork, so your history stays accurate.
+- **Shopping list handoff** (optional) sends missing ingredients to an external JSON shopping list.
+
+**Log & plan**
+- **Daily, weekly and progress views** with charts, macro splits and cost, each compared against the plan that was in force on that date.
+- **Nutrition plans:** fat loss, maintenance, lean gain, high gain, dirty bulk or custom. Targets are based on Katch-McArdle from lean body mass.
+- **Energy calibration** estimates your real maintenance intake from logged intake and weight trend, with confidence gating. Calibrated targets can replace the formula once the estimate is reliable.
+- **Dashboard** showing today's energy and protein, a 7-day trend, pantry value, month spend projection, expiring stock and top food sources. It links to a full food leaderboard.
+- **Export** to a full JSON backup or to CSVs of inventory, consumption, recipes and vitals.
+
+**Platform**
+- **Installable PWA** with a mobile-first layout.
+- **Guest tenants**, each with their own database, uploads and AI key.
+- **Optional [FORGE](docs/FORGE-INTEGRATION.md) integration.** SPENCE reads bodyweight, body fat and training-cycle data from a companion training app through a read-only export.
 
 ---
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Backend | PHP 8.2+ |
-| Database | SQLite3 |
-| Frontend | HTML, CSS, JavaScript |
-| UI Framework | Bootstrap 5.3 dark theme + Bootstrap Icons |
-| Charts | Chart.js 4.x |
-| AI Vision | NanoGPT (`google/gemini-3.7-flash`) via `core/nanogpt_client.php` |
-| Web Server | Nginx or Apache with PHP-FPM |
+| Backend | PHP 8.2+, no framework |
+| Database | SQLite 3 via PDO; schema migrations run on connect |
+| Frontend | Server-rendered PHP pages, vanilla JS, Bootstrap 5.3 (dark), Bootstrap Icons, Chart.js 4 |
+| AI | [NanoGPT](https://nano-gpt.com) chat-completions API (`google/gemini-3.7-flash`) |
 
 ---
 
-## Requirements
+## Quick start (local)
 
-- Nginx or Apache with PHP-FPM 8.2+
-- SQLite3
-- A [NanoGPT](https://nano-gpt.com) API key
+Requirements:
+- PHP 8.2+ with the `pdo_sqlite`, `curl` and `fileinfo` extensions.
+- A NanoGPT API key, for scanning only. Everything else works without one.
 
----
-
-## Installation
-
-### 1. Clone the repository
+SPENCE expects to be served under the `/spence/` URL path, so serve the directory *above* the checkout:
 
 ```bash
-git clone https://github.com/yourusername/spence.git
-cd spence
+git clone https://github.com/jaaaames0/spence.git
+cp spence/database/spence_empty.db spence/database/spence.db
+
+SPENCE_ACCESS_KEY=change-me \
+NANOGPT_API_KEY=your-nanogpt-key \
+php -S localhost:8000 -t .
 ```
 
-### 2. Configure your web server
+Open <http://localhost:8000/spence/>, log in with the access key, and go to **Settings** to set up your profile and targets.
 
-Point your Nginx or Apache virtual host document root at the project directory. Ensure PHP-FPM 8.2+ is enabled and the web server process has read/write access to the `database/` directory.
+The auth cookie is marked `Secure`. Browsers accept that over plain HTTP on `localhost`, but anywhere else SPENCE must be served over HTTPS.
 
-### 3. Initialize the database
-
-```bash
-cp database/spence_empty.db database/spence.db
-chmod 666 database/spence.db
-```
-
-### 4. Set your API key
-
-Put your NanoGPT API key, alone on one line, in a file readable by the web server, and point `NANOGPT_CREDENTIAL_FILE` at its absolute path (default `/srv/secrets/nanogpt.env`).
-
-### 5. Set your access key
-
-Put the access key you'll log in with, alone on one line, in a file readable by the web server, and point `SPENCE_CREDENTIAL_FILE` at it (default `/srv/secrets/spence_credentials.env`). SPENCE refuses all requests if no key is configured.
-
-For local development only, the `NANOGPT_API_KEY` and `SPENCE_ACCESS_KEY` environment variables are used when the files are absent. Production keeps credential values out of the PHP-FPM environment; see `DEPLOYMENT.md`.
-
-### Optional: connect FORGE
-
-SPENCE reads selected FORGE workout, body-composition, and training-cycle data without writing to FORGE. Production consumes the versioned read-only projection described in `docs/FORGE-INTEGRATION.md`; a sibling source checkout remains available as a development fallback. To use a projected database at another location, set `FORGE_DB_PATH` to its absolute path.
-
-### 6. Visit the app
-
-Navigate to your configured hostname. On first visit, go to **Settings** to initialise your user profile and macro targets.
+The environment-variable keys are a development convenience. For a real deployment, put the keys in files; see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
-## Usage Overview
+## Configuration
 
-| Page | What it does |
+All configuration is read from environment variables. Paths must be absolute.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `SPENCE_CREDENTIAL_FILE` | File containing the access key | `/etc/spence/access-key` |
+| `NANOGPT_CREDENTIAL_FILE` | File containing the NanoGPT API key | `/etc/spence/nanogpt-key` |
+| `SPENCE_ACCESS_KEY`, `NANOGPT_API_KEY` | Key values, used only when the credential file is missing (development) | none |
+| `SPENCE_DB_PATH` | SQLite database | `database/spence.db` |
+| `SPENCE_UPLOAD_DIR` | Uploaded receipt and food photos | `uploads/` |
+| `SPENCE_TENANTS_DIR` | Guest key files | `/etc/spence/tenants` |
+| `SPENCE_TENANT_DATA_DIR` | Guest databases and uploads | `/var/lib/spence/tenants` |
+| `FORGE_DB_PATH` | Read-only FORGE export (optional) | `/var/lib/forge/exports/spence-v1.db` |
+| `FORGE_EXPORT_MAX_AGE_SECONDS` | How old the FORGE export may be before it's ignored (minimum 60) | `300` |
+| `SPENCE_INGREDIENTS_PATH` | External shopping-list JSON file (optional) | unset (handoff off) |
+| `SPENCE_AI_DEBUG` | `1` adds request and response diagnostics to AI error replies | `0` |
+
+SPENCE refuses every request if no access key is configured.
+
+---
+
+## Using SPENCE
+
+| Page | What it's for |
 |---|---|
-| **Home** | Live intelligence dashboard — today's macros vs goals, pantry value, spend projection, 7-day trend, top sources, favourite meal |
-| **Stock** | View and manage full inventory; scan receipts; inline edit quantities and prices; Spice Rack modal |
-| **Eat** | Consume items from inventory by weight or unit; Quick Eat for camera or existing product |
-| **Cook** | Browse and execute recipes; live macro + cost preview; on-the-fly substitutions; spice check |
-| **RecipeDB** | Build and manage recipes with live macro preview, ingredient autocomplete, tags, spices, and instructions |
-| **Log** | Daily and weekly macro summaries, charts and cost analysis; body composition progress |
-| **Settings** | User profile, TDEE, macro targets, product master, and deduplication tools |
+| **Home** | Dashboard: today against your targets, the trend, spend, expiring stock, top sources |
+| **Stock** | Inventory, receipt scanning, inline edits, waste, spice rack |
+| **Eat** | Eat from stock, or Quick Eat (photo, describe, existing product) |
+| **Cook** | Browse and cook recipes, with substitutions, live macros and a spice check |
+| **RecipeDB** | Build and edit recipes |
+| **Log** | Daily view, weekly trends, weight and body-fat progress |
+| **Settings** | Profile and nutrition plan, product master, deduplication, export |
+
+See the [user guide](docs/USER_GUIDE.md) for a walkthrough of each page.
 
 ---
 
-## AI Vision & the Ingest Pipeline
+## Development
 
-When you scan a receipt, the image is sent directly to the configured vision model (synchronous — no background process). The model returns structured JSON including:
+```bash
+for t in tests/test_*.php; do php "$t" || break; done   # run the test suite
+php ops/rebuild-schema.php                               # regenerate schema.sql and spence_empty.db
+```
 
-- Clean, title-cased product names
-- Quantity and unit information
-- Price paid per line item
-- Estimated macronutrient profiles (energy, protein, fat, carbs per 100g)
-- A best-guess `weight_per_ea` for unit-based products
-- Category classification (including `Spice/Herb` routing to the Spice Rack)
+Schema migrations live in `get_db_connection()` (`core/db_helper.php`) and are the source of truth. After adding one, run `ops/rebuild-schema.php`, or `tests/test_schema.php` will fail.
 
-Potential duplicates against your existing product master are flagged for review, giving you the option to merge and consolidate stock.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
 
----
+## Documentation
 
-## Roadmap
-
-Completed: expiry tracking, adaptive/calibrated daily targets, label-aware Quick Eat and receipt scans, and JSON/CSV data export.
-
-Next: **Recipe Intelligence** — discover recipes from licensed and compliant sources, match them against inventory and expiring stock, assess fit against the active nutrition plan, review substitutions and missing ingredients, then import approved recipes into RecipeDB. Confirmed missing ingredients will be sent to the sibling Ingredients shopping-list app.
-
-Shopping prediction and AI assistance are part of this one workflow rather than standalone features. Distribution tooling (installer, configuration wizard, and data-wipe protocol) is deferred while SPENCE remains a single-user application.
-
----
+- [User guide](docs/USER_GUIDE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Deployment](DEPLOYMENT.md)
+- [FORGE integration](docs/FORGE-INTEGRATION.md)
+- [Recipe Intelligence design](docs/RECIPE_INTELLIGENCE.md)
+- [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md)
 
 ## Licence
 
-MIT
+[MIT](LICENSE)
