@@ -303,7 +303,7 @@ include '../../core/page_head.php';
             data.append('action', 'get_substitutes');
             data.append('name', row.dataset.name);
             fetch('../../core/raid_api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     row._subs = res.substitutes || [];
                     if (row.querySelector('.sub-dropdown').style.display !== 'none') rebuildDropdown(row);
@@ -441,7 +441,7 @@ include '../../core/page_head.php';
             data.append('action', 'sync_ingredients');
             data.append('ingredients', JSON.stringify(toBuy));
             fetch('../../core/ingredients_api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     if (res.status === 'success') window.open('/ingredients/', '_blank');
                     else alert(res.message);
@@ -488,7 +488,7 @@ include '../../core/page_head.php';
             data.append('custom_amounts', JSON.stringify(customAmounts));
 
             fetch('../../core/raid_api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     if (res.status === 'success') location.href = '../../eat/index.php';
                     else alert(res.message);
@@ -501,14 +501,14 @@ include '../../core/page_head.php';
             d.append('action', 'get_recipe_spices');
             d.append('recipe_id', <?= (int)$recipe_id ?>);
             fetch('../../core/api.php', { method: 'POST', body: d })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     const ids = res.spice_ids || [];
                     if (!ids.length) return;
                     // Fetch full spice data to get is_stocked + restock_flagged
                     const d2 = new FormData(); d2.append('action', 'get_spices');
                     fetch('../../core/api.php', { method: 'POST', body: d2 })
-                        .then(r => r.json())
+                        .then(spenceJson)
                         .then(res2 => {
                             const spices = (res2.spices || []).filter(s => ids.includes(parseInt(s.id)));
                             if (!spices.length) return;

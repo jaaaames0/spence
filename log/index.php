@@ -281,14 +281,14 @@ include '../core/page_head.php';
         const data = new FormData();
         data.append('action', 'delete_log');
         data.append('id', id);
-        fetch('../core/raid_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if (res.status === 'success') location.reload(); else alert(res.message); });
+        fetch('../core/raid_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { if (res.status === 'success') location.reload(); else alert(res.message); });
     }
     function setEnergyDayExclusion(excluded) {
         const data = new FormData();
         data.append('action', 'set_energy_day_exclusion');
         data.append('day', <?= json_encode($current_date) ?>);
         data.append('excluded', excluded ? '1' : '0');
-        fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+        fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
             if (res.status === 'success') location.reload(); else alert(res.message || 'Could not update calibration exclusion.');
         });
     }
@@ -312,7 +312,7 @@ include '../core/page_head.php';
         data.append('action', 'edit_log');
         data.append('id', quickEatEditId);
         data.append('amount', amount);
-        fetch('../core/raid_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+        fetch('../core/raid_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
             if (res.status === 'success') location.reload(); else alert(res.message);
         });
     }

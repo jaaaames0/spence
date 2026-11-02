@@ -6,6 +6,21 @@ function escHtml(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Use instead of r => r.json(): when the server crashes or a proxy answers (not JSON), fail with
+// a ServerError that says so, rather than "Unexpected end of JSON input" looking like a dropped connection.
+class ServerError extends Error {}
+function spenceJson(r) {
+    return r.text().then(text => {
+        try { return JSON.parse(text); }
+        catch (e) { throw new ServerError(`The server hit an error (HTTP ${r.status}) and didn't finish. Try again; if it keeps happening, it's a bug.`); }
+    });
+}
+
+// The message for a failed request: the server's own error, or a connection problem.
+function requestErrorMessage(err) {
+    return err instanceof ServerError ? err.message : 'Request failed. Check your connection and try again.';
+}
+
 // Focus the first visible [data-autofocus] field whenever any modal finishes opening.
 document.addEventListener('shown.bs.modal', event => {
     const field = [...event.target.querySelectorAll('[data-autofocus]')].find(el => el.offsetParent !== null);
@@ -175,7 +190,7 @@ function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel
     async function post(fields) {
         const data = new FormData();
         Object.entries(fields).forEach(([k, v]) => data.append(k, v));
-        return fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).catch(() => ({ status: 'error', message: 'Request failed' }));
+        return fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).catch(() => ({ status: 'error', message: 'Request failed' }));
     }
 
     async function apply({ dismissUnticked = false } = {}) {

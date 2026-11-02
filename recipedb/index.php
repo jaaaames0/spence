@@ -507,7 +507,7 @@ include '../core/page_head.php';
             e.preventDefault();
             const data = new FormData(e.target);
             fetch('../core/api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     if (res.status !== 'success') { alert('Error: ' + res.message); return; }
                     // Save spice associations then reload
@@ -548,14 +548,14 @@ include '../core/page_head.php';
                 if (allSpicesCache !== null) { cb(); return; }
                 const d = new FormData(); d.append('action', 'get_spices');
                 fetch('../core/api.php', { method: 'POST', body: d })
-                    .then(r => r.json())
+                    .then(spenceJson)
                     .then(res => { allSpicesCache = res.spices || []; cb(); });
             };
 
             if (recipeId) {
                 const d = new FormData(); d.append('action', 'get_recipe_spices'); d.append('recipe_id', recipeId);
                 fetch('../core/api.php', { method: 'POST', body: d })
-                    .then(r => r.json())
+                    .then(spenceJson)
                     .then(res => {
                         const sel = (res.spice_ids || []).map(Number);
                         fetchSpices(() => renderFn(sel));
@@ -577,7 +577,7 @@ include '../core/page_head.php';
             data.append('action', 'delete_recipe');
             data.append('id', id);
             fetch('../core/api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     if (res.status === 'success') location.reload();
                     else alert('Error: ' + res.message);

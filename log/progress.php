@@ -203,7 +203,7 @@ include '../core/page_head.php';
         e.preventDefault();
         const data = new FormData(e.target);
         data.append('action', 'update_vitals');
-        fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { 
+        fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { 
             if(res.status === 'success') location.reload(); 
             else alert(res.message); 
         });

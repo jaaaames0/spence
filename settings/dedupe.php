@@ -176,7 +176,7 @@ include '../core/page_head.php';
         const data = new FormData();
         data.append('action', 'merge_preview');
         data.append('ids', `${sourceId},${targetId}`);
-        const res = await fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json());
+        const res = await fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson);
         const byId = Object.fromEntries((res.products || []).map(p => [p.id, p]));
         if (!byId[sourceId] || !byId[targetId]) return alert('Could not load those products.');
         reviewing = { source: byId[sourceId], target: byId[targetId], reason };
@@ -219,7 +219,7 @@ include '../core/page_head.php';
         data.append('action', 'dismiss_dedupe_pair');
         data.append('id_a', idA);
         data.append('id_b', idB);
-        fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+        fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
             if (res.status === 'success') location.reload();
             else alert(res.message);
         });

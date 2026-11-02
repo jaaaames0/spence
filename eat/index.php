@@ -328,7 +328,7 @@ include '../core/page_head.php';
             data.append('amount', amount);
             
             fetch('../core/raid_api.php', { method: 'POST', body: data })
-            .then(r => r.json())
+            .then(spenceJson)
             .then(res => { 
                 if (res.status === 'success') location.reload(); 
                 else alert('Error: ' + res.message); 
@@ -572,7 +572,7 @@ include '../core/page_head.php';
         }
 
         fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
-            .then(r => r.json())
+            .then(spenceJson)
             .then(res => {
                 document.getElementById('qeScanningState').style.display = 'none';
                 if (res.status !== 'success') {
@@ -587,7 +587,7 @@ include '../core/page_head.php';
             .catch(err => {
                 document.getElementById('qeScanningState').style.display = 'none';
                 showQeInputState();
-                alert('Request failed. Check your connection and try again.\n\n' + err);
+                alert(requestErrorMessage(err));
             });
     }
 
@@ -721,7 +721,7 @@ include '../core/page_head.php';
         data.append('items', JSON.stringify(items));
 
         fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
-            .then(r => r.json())
+            .then(spenceJson)
             .then(res => {
                 if (res.status !== 'success') { alert('Error: ' + res.message); return; }
                 document.getElementById('qeReviewState').style.display = 'none';
@@ -834,7 +834,7 @@ include '../core/page_head.php';
         data.append('amount', amount);
 
         fetch('../core/quick_eat_api.php', { method: 'POST', body: data })
-            .then(r => r.json())
+            .then(spenceJson)
             .then(res => {
                 if (res.status !== 'success') { alert('Error: ' + res.message); return; }
                 const m = res.macros;

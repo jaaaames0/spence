@@ -271,7 +271,7 @@ include '../core/page_head.php';
 
         function executeDrop() {
             const data = new FormData(); data.append('action', 'drop_product'); data.append('id', activeId);
-            fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
                 if(res.status === 'success') location.reload();
             });
         }
@@ -280,7 +280,7 @@ include '../core/page_head.php';
             e.preventDefault();
             const data = new FormData(e.target);
             data.append('action', 'create_product');
-            fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
                 if(res.status === 'success') location.reload();
                 else alert('Error: ' + res.message);
             });
@@ -305,7 +305,7 @@ include '../core/page_head.php';
             data.append('fat', row.querySelector('.edit-fat').value);
             data.append('carb', row.querySelector('.edit-carb').value);
             data.append('weight', row.querySelector('.edit-weight').value);
-            fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
                 if(res.status === 'success') location.reload();
                 else alert('Error: ' + res.message);
             });

@@ -405,7 +405,7 @@ include '../core/page_head.php';
             data.append('receipt', file);
 
             fetch('../core/receipt_api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     clearInterval(msgTimer);
                     document.getElementById('scanBtn').disabled = false;
@@ -430,7 +430,7 @@ include '../core/page_head.php';
                 .catch(err => {
                     clearInterval(msgTimer);
                     document.getElementById('scanBtn').disabled = false;
-                    statusAlert.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Request failed — check connection and try again.';
+                    statusAlert.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>' + escHtml(requestErrorMessage(err));
                 });
         }
 
@@ -471,7 +471,7 @@ include '../core/page_head.php';
                     data.append('job_id', res.job_id);
                     data.append('index', row.dataset.index);
                     data.append('spice_id', row.querySelector('select').value);
-                    fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(moved => {
+                    fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).then(moved => {
                         if (moved.status !== 'success') return alert('Error: ' + moved.message);
                         if (moved.product_deleted) removedProductIds.push(+moved.product_id);
                         row.querySelector('.spice-review-actions').outerHTML =
@@ -502,11 +502,11 @@ include '../core/page_head.php';
             data.append('price', row.querySelector('.edit-price').value);
             data.append('location', row.querySelector('.edit-location').value);
             data.append('expiry_date', row.querySelector('.edit-expiry').value);
-            fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status==='success') location.reload(); });
+            fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { if(res.status==='success') location.reload(); });
         }
         // action 'waste' logs the row's remaining value as wastage; 'delete' just removes it (corrections)
         function removeRow(id, action) {
-            fetch('../core/api.php', { method: 'POST', body: new URLSearchParams({action, id}) }).then(r => r.json()).then(res => {
+            fetch('../core/api.php', { method: 'POST', body: new URLSearchParams({action, id}) }).then(spenceJson).then(res => {
                 if (res.status !== 'success') return;
                 document.getElementById('row-'+id).remove();
                 document.getElementById('mob-detail-'+id)?.remove();
@@ -570,7 +570,7 @@ include '../core/page_head.php';
             if (!pid) return alert('Please select a valid product from the list.');
             const data = new FormData(e.target);
             data.append('action', 'create_inventory');
-            fetch('../core/api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
                 if(res.status === 'success') location.reload(); else alert('Error: ' + res.message);
             });
         }
@@ -592,7 +592,7 @@ include '../core/page_head.php';
             const data = new FormData();
             data.append('action', 'get_spices');
             fetch('../core/api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     spiceData = res.spices || [];
                     renderSpices();
@@ -657,7 +657,7 @@ include '../core/page_head.php';
             data.append('action', 'add_spice');
             data.append('name', name);
             fetch('../core/api.php', { method: 'POST', body: data })
-                .then(r => r.json())
+                .then(spenceJson)
                 .then(res => {
                     if (res.status === 'success') {
                         input.value = '';

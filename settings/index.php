@@ -390,7 +390,7 @@ include '../core/page_head.php';
             const data = new FormData();
             data.append('action', 'update_activity');
             data.append('activity', val);
-            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status === 'success') location.reload(); });
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { if(res.status === 'success') location.reload(); });
         }
 
         function saveEnergyPreferences(e) {
@@ -399,7 +399,7 @@ include '../core/page_head.php';
             data.append('action', 'save_energy_preferences');
             const enabledInput = e.target.querySelector('[name="enabled"]');
             data.set('enabled', enabledInput ? (enabledInput.type === 'checkbox' ? (enabledInput.checked ? '1' : '0') : enabledInput.value) : '0');
-            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
                 if (res.status === 'success') location.reload(); else alert(res.message || 'Could not save energy settings.');
             });
         }
@@ -410,7 +410,7 @@ include '../core/page_head.php';
             data.append('action', 'save_active_plan');
             const enabledInput = e.target.querySelector('[name="enabled"]');
             data.set('enabled', enabledInput ? (enabledInput.type === 'checkbox' ? (enabledInput.checked ? '1' : '0') : enabledInput.value) : '0');
-            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
                 if (res.status === 'success') location.reload(); else alert(res.message || 'Could not save energy plan.');
             });
         }
@@ -419,7 +419,7 @@ include '../core/page_head.php';
             const form = document.getElementById('activePlanForm');
             form.elements.enabled.value = enabled ? '1' : '0';
             const data = new FormData(form); data.append('action', 'save_energy_preferences');
-            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => {
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => {
                 if (res.status === 'success') location.reload(); else alert(res.message || 'Could not update maintenance source.');
             });
         }
@@ -471,7 +471,7 @@ include '../core/page_head.php';
             e.preventDefault();
             const data = new FormData(e.target);
             data.append('action', 'init_profile');
-            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
         }
 
         function submitOverride(e) {
@@ -480,14 +480,14 @@ include '../core/page_head.php';
             data.append('action', 'update_goals');
             const weekly = parseFloat(document.getElementById('weeklyBudgetInput').value);
             data.append('cost', (weekly / 7).toFixed(2));
-            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
         }
 
         function submitWeighIn(e) {
             e.preventDefault();
             const data = new FormData(e.target);
             data.append('action', 'update_vitals');
-            fetch('../core/user_api.php', { method: 'POST', body: data }).then(r => r.json()).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
         }
     </script>
 <?php include '../core/page_foot.php'; ?>
