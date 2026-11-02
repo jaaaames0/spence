@@ -24,7 +24,7 @@ chmod 666 database/spence.db
 
 **Tenancy**: the original install is the primary tenant; guests are key files in `SPENCE_TENANTS_DIR` with their own DB and uploads under `SPENCE_TENANT_DATA_DIR/<id>/`. `auth.php` resolves the tenant from the cookie (`<id>.<hmac>` for guests, the original token for the primary) and `spenceTenant()` (`core/runtime_config.php`) supplies its paths to `get_db_connection()` and `spenceUploadDir()`. Guests never get Forge (`getForgeDbConnection()` returns null) or the Ingredients list, and scan with their own `<id>.nanogpt` key via `spenceNanoGptKey()` (none means scanning is off, never the primary's key). Provision with `ops/spence-create-tenant.php`, which seeds the raw product catalogue; see `DEPLOYMENT.md`.
 
-**Timezone** is hardcoded to `Australia/Sydney` in `core/db_helper.php`.
+**Timezone** is hardcoded to `Australia/Sydney` in `core/db_helper.php`. Timestamps are stored in UTC and the offset changes with DST, so never apply a fixed offset: filter a local day or range with `col >= ? AND col < ?` and `spenceLocalDayBounds()`, and group or display per row with the SQL functions `spence_local_date()` / `spence_local_datetime()` registered by `get_db_connection()`.
 
 ## Architecture
 
@@ -41,9 +41,10 @@ Three-layer: frontend PHP pages → API endpoints → PDO SQLite.
 **Core logic files:**
 - `core/db_helper.php` — PDO connection, `getUnitCost()`, `syncRecipeToProduct()` (recalculates macros/cost when recipe changes)
 - `core/matching.php` — Jaccard similarity deduplication during ingest
+- `core/recipes.php` — `saveRecipe()` for the RecipeDB editor: ingredients by posted product id (through `merges_into`); an ingredient change forks a new version and retires the edited lineage
 - `core/receipt_ingest.php` — maps the vision model's JSON output to DB inserts, AI catalogue matching
 
-**Database:** `database/schema.sql` is the canonical schema. `database/spence_empty.db` is the blank template committed to git. Live `spence.db` is gitignored.
+**Database:** migrations in `get_db_connection()` (`core/db_helper.php`) are the source of truth. `database/schema.sql` (the fully migrated schema) and `database/spence_empty.db` (the blank template, all migrations recorded) are generated from them by `ops/rebuild-schema.php`; run it after adding a migration, or `tests/test_schema.php` fails. Live `spence.db` is gitignored.
 
 ## Key Domain Concepts
 

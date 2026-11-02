@@ -113,10 +113,10 @@ function attachProductSearch({ input, list, products, onSelect, meta = null, lim
 function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel = 'Into this' } = {}) {
     const state = pairs.map(p => ({ ...p, active: !!p.active, name: 'target', macros: 'target' }));
     const num = n => (Math.round(n * 10) / 10).toString();
-    const unit = p => p.base_unit === 'ea' ? `each (${num(p.weight_per_ea * 1000)} g)` : `per ${p.base_unit}`;
+    const unit = p => p.base_unit === 'ea' ? `each (${num(p.weight_per_ea * 1000)} g)` : `per ${escHtml(p.base_unit)}`;
     const macros = p => `${Math.round(p.kj_per_100)} kJ · P ${num(p.protein_per_100)} · F ${num(p.fat_per_100)} · C ${num(p.carb_per_100)}`;
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-    const use = p => [p.stock_qty ? `${num(p.stock_qty)} ${p.base_unit} in stock` : 'none in stock',
+    const use = p => [p.stock_qty ? `${num(p.stock_qty)} ${escHtml(p.base_unit)} in stock` : 'none in stock',
         plural(p.log_count, 'log'), p.recipe_count ? plural(p.recipe_count, 'recipe') : ''].filter(Boolean).join(' · ');
     const off = (x, y, floor) => Math.abs(x - y) > Math.max(0.15 * Math.max(x, y), floor);
     const differ = (a, b) => off(a.kj_per_100, b.kj_per_100, 40) || ['protein_per_100', 'fat_per_100', 'carb_per_100'].some(k => off(a[k], b[k], 1));

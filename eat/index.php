@@ -614,9 +614,9 @@ include '../core/page_head.php';
                 </div>
                 <div class="d-flex flex-wrap gap-1 align-items-center">
                     <input type="number" class="form-control form-control-sm text-center qe-kj" id="qe-kj-${i}" value="${Math.round(item.kj_per_100) || 0}" oninput="updateQeTotals()" title="kJ/100g" style="width:66px;" placeholder="kJ">
-                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-p" id="qe-p-${i}" value="${item.protein_per_100 || 0}" oninput="updateQeTotals()" title="Protein/100g" style="width:55px;" placeholder="P">
-                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-f" id="qe-f-${i}" value="${item.fat_per_100 || 0}" oninput="updateQeTotals()" title="Fat/100g" style="width:55px;" placeholder="F">
-                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-c" id="qe-c-${i}" value="${item.carbs_per_100 || 0}" oninput="updateQeTotals()" title="Carbs/100g" style="width:55px;" placeholder="C">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-p" id="qe-p-${i}" value="${escHtml(item.protein_per_100 || 0)}" oninput="updateQeTotals()" title="Protein/100g" style="width:55px;" placeholder="P">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-f" id="qe-f-${i}" value="${escHtml(item.fat_per_100 || 0)}" oninput="updateQeTotals()" title="Fat/100g" style="width:55px;" placeholder="F">
+                    <input type="number" step="0.1" class="form-control form-control-sm text-center qe-c" id="qe-c-${i}" value="${escHtml(item.carbs_per_100 || 0)}" oninput="updateQeTotals()" title="Carbs/100g" style="width:55px;" placeholder="C">
                     <span class="text-muted ms-1" style="font-size:0.6rem; white-space:nowrap;">per 100g</span>
                     <div class="input-group input-group-sm ms-auto" style="width:92px; flex-shrink:0;">
                         <span class="input-group-text" style="background:#1a1a1a; border-color:#444; color:#666;">$</span>

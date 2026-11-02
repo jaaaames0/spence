@@ -228,18 +228,18 @@ function getEnergyCalibration(PDO $db, int $lookbackDays = 180): array {
     $start = date('Y-m-d', strtotime("-{$lookbackDays} days"));
     // Prior-phase estimates look back from the current phase start, so fetch enough history to cover it
     $historyStart = date('Y-m-d', strtotime('-' . ($lookbackDays * 2) . ' days'));
-    $tz = SPENCE_TIMEZONE_OFFSET;
-    $stmt = $db->prepare("SELECT DATE(consumed_at, '{$tz}') AS day, SUM(kj) AS intake_kj
-        FROM consumption_log WHERE DATE(consumed_at, '{$tz}') >= ? GROUP BY day");
-    $stmt->execute([$historyStart]);
+    [$historyStartUtc] = spenceLocalDayBounds($historyStart);
+    $stmt = $db->prepare("SELECT spence_local_date(consumed_at) AS day, SUM(kj) AS intake_kj
+        FROM consumption_log WHERE consumed_at >= ? GROUP BY day");
+    $stmt->execute([$historyStartUtc]);
     $intake = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'intake_kj', 'day');
     $excluded = array_flip($db->query("SELECT day FROM energy_day_exclusions WHERE day >= " . $db->quote($historyStart))->fetchAll(PDO::FETCH_COLUMN));
 
     $weights = [];
     $userId = $db->query('SELECT id FROM user_profiles LIMIT 1')->fetchColumn();
     if ($userId) {
-        $stmt = $db->prepare("SELECT DATE(recorded_at, '{$tz}') AS day, weight_kg FROM user_vitals_history WHERE user_id = ? AND weight_kg IS NOT NULL AND DATE(recorded_at, '{$tz}') >= ?");
-        $stmt->execute([$userId, $historyStart]);
+        $stmt = $db->prepare("SELECT spence_local_date(recorded_at) AS day, weight_kg FROM user_vitals_history WHERE user_id = ? AND weight_kg IS NOT NULL AND recorded_at >= ?");
+        $stmt->execute([$userId, $historyStartUtc]);
         $weights = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     foreach (getForgeVitalsHistory() as $v) if ($v['weight_kg'] !== null && substr($v['local_recorded_at'], 0, 10) >= $historyStart) $weights[] = ['day' => substr($v['local_recorded_at'], 0, 10), 'weight_kg' => $v['weight_kg']];
@@ -298,7 +298,7 @@ function getAdaptiveEnergyTarget(PDO $db, string $day, float $fallback): array {
 
 /** Return the newest weight and body-fat readings across SPENCE and Forge independently. */
 function getLatestCombinedVitals(PDO $db, int $userId): array {
-    $stmt = $db->prepare("SELECT weight_kg, body_fat_pct, DATETIME(recorded_at, '" . SPENCE_TIMEZONE_OFFSET . "') AS local_recorded_at, 'Spence' AS source FROM user_vitals_history WHERE user_id = ?");
+    $stmt = $db->prepare("SELECT weight_kg, body_fat_pct, spence_local_datetime(recorded_at) AS local_recorded_at, 'Spence' AS source FROM user_vitals_history WHERE user_id = ?");
     $stmt->execute([$userId]);
     $history = array_merge($stmt->fetchAll(PDO::FETCH_ASSOC), getForgeVitalsHistory());
     usort($history, fn($a, $b) => strcmp($a['local_recorded_at'], $b['local_recorded_at']));
@@ -398,7 +398,11 @@ function getActiveEnergyPlan(PDO $db, string $day): array {
     $fatEnergy = (float)$goals['f'] * 37.656; $carbEnergy = (float)$goals['c'] * 16.736;
     $remaining = max(0, $target - $protein * 16.736);
     $fatShare = ($fatEnergy + $carbEnergy) > 0 ? $fatEnergy / ($fatEnergy + $carbEnergy) : 0.4;
-    $regime = inferEnergyRegime(null, $goals['goal_type'], (float)($prefs['goal_adjustment_kj'] ?? 0)) ?? 'maintenance';
+    // The regime follows the plan actually in force: the calibrated adjustment when calibrated,
+    // otherwise the saved goal (a missing preference row is not a maintenance choice)
+    $regime = ($calibrated
+        ? inferEnergyRegime(null, $goals['goal_type'], $goalAdjustment)
+        : inferEnergyRegime($goals['regime'], $goals['goal_type']) ?? inferEnergyRegime(null, null, $goalAdjustment)) ?? 'maintenance';
     return ['maintenance' => $maintenance, 'formula_maintenance' => $formula, 'target_kj' => $target, 'protein' => $protein,
         'fat' => $remaining * $fatShare / 37.656, 'carb' => $remaining * (1 - $fatShare) / 16.736,
         'calibrated' => $calibrated, 'training' => $training, 'calibration' => $calibration, 'goal_adjustment' => $goalAdjustment,

@@ -20,7 +20,7 @@ $user_id = $stmt->fetchColumn();
 $spence_vitals_history = [];
 if ($user_id) {
     $stmt = $db->prepare("
-        SELECT weight_kg, body_fat_pct, DATETIME(recorded_at, '" . SPENCE_TIMEZONE_OFFSET . "') as local_recorded_at, 'Spence' AS source
+        SELECT weight_kg, body_fat_pct, spence_local_datetime(recorded_at) as local_recorded_at, 'Spence' AS source
         FROM user_vitals_history
         WHERE user_id = ?
         ORDER BY recorded_at ASC");

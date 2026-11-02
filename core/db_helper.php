@@ -6,7 +6,48 @@ require_once __DIR__ . '/runtime_config.php';
 
 // Global Timezone Protocol (GTP v1.0)
 date_default_timezone_set('Australia/Sydney');
-define('SPENCE_TIMEZONE_OFFSET', sprintf('%+d hours', (int)(date('Z') / 3600))); // Derived from system tz, handles AEDT/AEST DST
+
+/*
+ * Timestamps are stored in UTC (CURRENT_TIMESTAMP). Sydney's offset is +10 or +11 depending on DST,
+ * so each value is converted on its own date: never apply today's offset to history.
+ */
+
+/** Local 'Y-m-d H:i:s' for a stored UTC timestamp. */
+function spenceLocalDateTime(?string $utc): ?string {
+    if ($utc === null || $utc === '') return null;
+    try {
+        $time = new DateTimeImmutable($utc, new DateTimeZone('UTC'));
+    } catch (Exception $e) {
+        return null;
+    }
+    return $time->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d H:i:s');
+}
+
+/**
+ * UTC bounds [start, end) covering local days $fromDay..$toDay, for `col >= ? AND col < ?`
+ * against stored UTC timestamps (which also lets the column's index be used).
+ */
+function spenceLocalDayBounds(string $fromDay, ?string $toDay = null): array {
+    $local = new DateTimeZone(date_default_timezone_get());
+    $utc = new DateTimeZone('UTC');
+    $start = DateTimeImmutable::createFromFormat('!Y-m-d', $fromDay, $local);
+    $end = DateTimeImmutable::createFromFormat('!Y-m-d', $toDay ?? $fromDay, $local);
+    if (!$start || !$end) throw new InvalidArgumentException('Expected Y-m-d local days');
+    return [
+        $start->setTimezone($utc)->format('Y-m-d H:i:s'),
+        $end->modify('+1 day')->setTimezone($utc)->format('Y-m-d H:i:s'),
+    ];
+}
+
+/** SQL helpers for per-row conversion: spence_local_date(col), spence_local_datetime(col). */
+function registerSpenceSqlFunctions(PDO $db): void {
+    $flags = defined('PDO::SQLITE_DETERMINISTIC') ? PDO::SQLITE_DETERMINISTIC : 0;
+    $db->sqliteCreateFunction('spence_local_datetime', fn($utc) => spenceLocalDateTime($utc === null ? null : (string)$utc), 1, $flags);
+    $db->sqliteCreateFunction('spence_local_date', function ($utc) {
+        $local = spenceLocalDateTime($utc === null ? null : (string)$utc);
+        return $local === null ? null : substr($local, 0, 10);
+    }, 1, $flags);
+}
 
 function applyDatabaseMigration(PDO $db, string $version, callable $migration): void {
     $stmt = $db->prepare('SELECT 1 FROM schema_migrations WHERE version = ?');
@@ -31,6 +72,7 @@ function get_db_connection(?string $dbPath = null): PDO {
     $db->exec('PRAGMA busy_timeout = 5000;');
     $db->exec('PRAGMA journal_mode=WAL;');
     $db->exec('PRAGMA foreign_keys = ON;');
+    registerSpenceSqlFunctions($db);
     $db->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
         version TEXT PRIMARY KEY,
         applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -166,6 +208,8 @@ function get_db_connection(?string $dbPath = null): PDO {
         )');
     });
 
+    // Shares the 007_ prefix with 007_activity_rate_override (both branches were numbered at once).
+    // Versions are recorded in live databases, so never rename one; number new migrations from 010.
     applyDatabaseMigration($db, '007_purchase_and_waste_logs', function (PDO $db): void {
         // No product FKs: like consumption_log, history must survive product deletes and merges.
         $db->exec('CREATE TABLE IF NOT EXISTS purchase_log (
@@ -224,15 +268,15 @@ function recordWaste(PDO $db, int $productId, float $qty, string $unit, float $v
  * (consumed + wasted) rather than purchases, which land in lumps and would swing a weekly ratio.
  */
 function getWasteSummary(PDO $db, string $startDate, string $endDate): array {
-    $tz = SPENCE_TIMEZONE_OFFSET;
-    $sum = function (string $sql) use ($db, $startDate, $endDate): float {
+    $bounds = spenceLocalDayBounds($startDate, $endDate);
+    $sum = function (string $sql) use ($db, $bounds): float {
         $stmt = $db->prepare($sql);
-        $stmt->execute([$startDate, $endDate]);
+        $stmt->execute($bounds);
         return (float)($stmt->fetchColumn() ?: 0);
     };
-    $consumed = $sum("SELECT SUM(amount * unit_cost) FROM consumption_log WHERE DATE(consumed_at, '$tz') BETWEEN ? AND ?");
-    $wasted = $sum("SELECT SUM(value) FROM waste_log WHERE DATE(wasted_at, '$tz') BETWEEN ? AND ?");
-    $spent = $sum("SELECT SUM(price) FROM purchase_log WHERE DATE(purchased_at, '$tz') BETWEEN ? AND ?");
+    $consumed = $sum("SELECT SUM(amount * unit_cost) FROM consumption_log WHERE consumed_at >= ? AND consumed_at < ?");
+    $wasted = $sum("SELECT SUM(value) FROM waste_log WHERE wasted_at >= ? AND wasted_at < ?");
+    $spent = $sum("SELECT SUM(price) FROM purchase_log WHERE purchased_at >= ? AND purchased_at < ?");
     $used = $consumed + $wasted;
     return [
         'consumed' => $consumed,
@@ -286,6 +330,41 @@ function deductInventoryLots(PDO $db, int $productId, float $requiredQty, float 
     if ($remaining > $tolerance) throw new Exception("Insufficient stock for ingredient.");
 
     return ['quantity' => $deductedQty, 'cost' => $deductedCost];
+}
+
+/**
+ * Move stock for an edited inventory log entry and return the entry's new unit cost.
+ * Eating more deducts across lots at each lot's own cost basis; eating less returns the
+ * difference at the cost it was logged at. The log's total cost stays equal to the stock removed.
+ */
+function adjustLoggedInventory(PDO $db, array $log, float $newAmount): float {
+    $productId = (int)$log['product_id'];
+    $oldAmount = (float)$log['amount'];
+    $loggedCost = (float)$log['unit_cost'];
+    $diff = $newAmount - $oldAmount;
+
+    if ($diff > 0.0001) {
+        $deducted = deductInventoryLots($db, $productId, $diff, 0.0001);
+        return ($oldAmount * $loggedCost + $deducted['cost']) / $newAmount;
+    }
+    if ($diff < -0.0001) {
+        $returned = -$diff;
+        $unitCost = $loggedCost ?: getUnitCost($db, $productId);
+        $stmt = $db->prepare("SELECT id FROM inventory WHERE product_id = ? ORDER BY location = 'Fridge' DESC, updated_at DESC LIMIT 1");
+        $stmt->execute([$productId]);
+        $inventoryId = $stmt->fetchColumn();
+        if ($inventoryId) {
+            $db->prepare("UPDATE inventory SET current_qty = current_qty + ?, price_paid = price_paid + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+               ->execute([$returned, $unitCost * $returned, $inventoryId]);
+        } else {
+            $stmt = $db->prepare("SELECT base_unit FROM products WHERE id = ?");
+            $stmt->execute([$productId]);
+            $baseUnit = $stmt->fetchColumn() ?: ($log['unit'] ?: 'ea');
+            $db->prepare("INSERT INTO inventory (product_id, current_qty, unit, price_paid, location) VALUES (?, ?, ?, ?, 'Fridge')")
+               ->execute([$productId, $returned, $baseUnit, $unitCost * $returned]);
+        }
+    }
+    return $loggedCost;
 }
 
 /**
@@ -392,6 +471,86 @@ function syncRecipeToProduct($db, $recipe_id) {
 function productBaseName(string $name): string {
     $base = trim(explode(',', $name, 2)[0]);
     return $base === '' ? trim($name) : $base;
+}
+
+/**
+ * Split $total across keys in proportion to $shares, rounded to $decimals with the largest
+ * remainders rounded up, so the rounded parts add up to the rounded total exactly.
+ */
+function apportionToTotal(array $shares, float $total, int $decimals = 0): array {
+    if (!$shares) return [];
+    $shares = array_map(fn($share) => max(0.0, (float)$share), $shares);
+    $sum = array_sum($shares);
+    if ($sum <= 0) {
+        $shares = array_fill_keys(array_keys($shares), 1.0);
+        $sum = count($shares);
+    }
+    $scale = 10 ** $decimals;
+    $units = max(0, (int)round($total * $scale));
+    $parts = $remainders = [];
+    foreach ($shares as $key => $share) {
+        $exact = $units * $share / $sum;
+        $parts[$key] = (int)floor($exact);
+        $remainders[$key] = $exact - $parts[$key];
+    }
+    arsort($remainders);
+    foreach (array_slice(array_keys($remainders), 0, $units - array_sum($parts)) as $key) $parts[$key]++;
+    return array_map(fn($part) => round($part / $scale, $decimals), $parts);
+}
+
+/**
+ * Per-ingredient rows for a logged recipe entry that add up to what was logged.
+ *
+ * A recipe version's ingredient amounts never change (an ingredient edit forks a new version, a
+ * substituted cook logs a ghost fork), so each row's amount is historical. Product macros and
+ * prices are current, so they only decide each ingredient's share of the logged kJ, P, F, C and
+ * cost; a nutrient no ingredient now carries is split by weight.
+ * $entry: recipe_id, amount, unit, yield_serves, kj, protein, fat, carb, unit_cost, last_unit_cost.
+ */
+function buildLoggedRecipeBreakdown(PDO $db, array $entry): array {
+    $stmt = $db->prepare("SELECT ri.product_id, ri.amount, ri.unit, p.name AS product_name, p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100, p.weight_per_ea
+        FROM recipe_ingredients ri JOIN products p ON ri.product_id = p.id WHERE ri.recipe_id = ? ORDER BY ri.id");
+    $stmt->execute([$entry['recipe_id']]);
+    $ingredients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$ingredients) return [];
+
+    $weights = array_map(fn($ing) => $ing['unit'] === 'ea' ? (float)$ing['amount'] * (float)$ing['weight_per_ea'] : (float)$ing['amount'], $ingredients);
+    $totalWeight = array_sum($weights);
+    // Serves when logged per portion, otherwise a weight of the whole recipe
+    $ratio = ($entry['unit'] ?? 'ea') === 'ea'
+        ? (float)$entry['amount'] / ((float)$entry['yield_serves'] ?: 1)
+        : ($totalWeight > 0 ? (float)$entry['amount'] / $totalWeight : 0);
+
+    $current = ['kj' => [], 'p' => [], 'f' => [], 'c' => [], 'cost' => []];
+    foreach ($ingredients as $i => $ing) {
+        $factor = $weights[$i] / 0.1;
+        $current['kj'][$i] = $factor * (float)$ing['kj_per_100'];
+        $current['p'][$i] = $factor * (float)$ing['protein_per_100'];
+        $current['f'][$i] = $factor * (float)$ing['fat_per_100'];
+        $current['c'][$i] = $factor * (float)$ing['carb_per_100'];
+        $current['cost'][$i] = getUnitCost($db, (int)$ing['product_id']) * (float)$ing['amount'];
+    }
+    $logged = [
+        'kj' => [(float)$entry['kj'], 0], 'p' => [(float)$entry['protein'], 1], 'f' => [(float)$entry['fat'], 1], 'c' => [(float)$entry['carb'], 1],
+        'cost' => [(float)$entry['amount'] * ((float)$entry['unit_cost'] ?: (float)$entry['last_unit_cost']), 2],
+    ];
+    $split = [];
+    foreach ($logged as $key => [$total, $decimals]) {
+        $shares = array_sum($current[$key]) > 0 ? $current[$key] : $weights;
+        $split[$key] = apportionToTotal($shares, $total, $decimals);
+    }
+
+    $rows = [];
+    foreach ($ingredients as $i => $ing) {
+        $rows[] = [
+            'name' => $ing['product_name'],
+            'amount' => (float)$ing['amount'] * $ratio,
+            'unit' => $ing['unit'],
+            'kj' => $split['kj'][$i], 'p' => $split['p'][$i], 'f' => $split['f'][$i], 'c' => $split['c'][$i],
+            'cost' => $split['cost'][$i],
+        ];
+    }
+    return $rows;
 }
 
 /**

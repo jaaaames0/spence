@@ -9,7 +9,13 @@
 // credits its chicken and rice. Per food: kj, protein, kg eaten, serves (cooked recipes in
 // 'meal' mode only), and times (log entries it appeared in).
 function getFoodSources(PDO $db, ?int $days, string $mode): array {
-    $window = $days ? "cl.consumed_at >= datetime('now', '-$days days')" : '1 = 1';
+    // The last $days local days including today, matching the dashboard's day-based cards
+    if ($days) {
+        [$from, $to] = spenceLocalDayBounds(date('Y-m-d', strtotime('-' . ($days - 1) . ' days')), date('Y-m-d'));
+        $window = 'cl.consumed_at >= ' . $db->quote($from) . ' AND cl.consumed_at < ' . $db->quote($to);
+    } else {
+        $window = '1 = 1';
+    }
     $ingKg = "(CASE WHEN ri.unit = 'ea' THEN ri.amount * ip.weight_per_ea ELSE ri.amount END)";
     $logKg = "(CASE WHEN cl.unit = 'ea' THEN cl.amount * COALESCE(p.weight_per_ea, cl.quick_eat_weight_per_ea, 0) ELSE cl.amount END)";
     // Merged products show as their survivor; recipe forks show as the recipe they forked from

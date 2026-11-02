@@ -10,6 +10,8 @@ $db = get_db_connection();
 // --- Time-Travel ---
 $today_str = date('Y-m-d');
 $current_date = $_GET['date'] ?? $today_str;
+if (!DateTime::createFromFormat('!Y-m-d', $current_date)) $current_date = $today_str;
+$day_bounds = spenceLocalDayBounds($current_date);
 $prev_date = date('Y-m-d', strtotime($current_date . ' -1 day'));
 $next_date = date('Y-m-d', strtotime($current_date . ' +1 day'));
 
@@ -17,29 +19,29 @@ $next_date = date('Y-m-d', strtotime($current_date . ' +1 day'));
 $stmt = $db->prepare("
     SELECT SUM(kj) as total_kj, SUM(protein) as total_p, SUM(fat) as total_f, SUM(carb) as total_c, COUNT(*) as entries
     FROM consumption_log 
-    WHERE DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') = ?");
-$stmt->execute([$current_date]);
+    WHERE consumed_at >= ? AND consumed_at < ?");
+$stmt->execute($day_bounds);
 $daily = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // 2. Today's Cost
 $stmt = $db->prepare("
     SELECT SUM(cl.amount * cl.unit_cost) as total_cost
     FROM consumption_log cl
-    WHERE DATE(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') = ?");
-$stmt->execute([$current_date]);
+    WHERE cl.consumed_at >= ? AND cl.consumed_at < ?");
+$stmt->execute($day_bounds);
 $daily_cost = $stmt->fetchColumn() ?: 0;
 
 // 3. Averages
 $stmt = $db->prepare("
     SELECT AVG(day_kj) as avg_kj, AVG(day_p) as avg_p, AVG(day_f) as avg_f, AVG(day_c) as avg_c, AVG(day_cost) as avg_cost
     FROM (
-        SELECT DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') as d, SUM(kj) as day_kj, SUM(protein) as day_p, SUM(fat) as day_f, SUM(carb) as day_c,
+        SELECT spence_local_date(consumed_at) as d, SUM(kj) as day_kj, SUM(protein) as day_p, SUM(fat) as day_f, SUM(carb) as day_c,
                SUM(amount * unit_cost) as day_cost
         FROM consumption_log 
-        WHERE DATE(consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') BETWEEN date(?, '-6 days') AND ?
+        WHERE consumed_at >= ? AND consumed_at < ?
         GROUP BY d
     )");
-$stmt->execute([$current_date, $current_date]);
+$stmt->execute(spenceLocalDayBounds(date('Y-m-d', strtotime($current_date . ' -6 days')), $current_date));
 $averages = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // 4. Goal Fetching
@@ -74,59 +76,24 @@ $stmt = $db->prepare("
     SELECT cl.*,
            COALESCE(p_parent.name, p.name, cl.name, '—') as product_name,
            p.last_unit_cost, p.recipe_id, r.yield_serves, r.is_active as recipe_active,
-           DATETIME(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') as local_consumed_at
+           spence_local_datetime(cl.consumed_at) as local_consumed_at
     FROM consumption_log cl
     LEFT JOIN products p ON cl.product_id = p.id
     LEFT JOIN recipes r ON p.recipe_id = r.id
     LEFT JOIN recipes r_parent ON r.parent_recipe_id = r_parent.id
     LEFT JOIN products p_parent ON r_parent.product_id = p_parent.id
-    WHERE DATE(cl.consumed_at, '" . SPENCE_TIMEZONE_OFFSET . "') = ?
+    WHERE cl.consumed_at >= ? AND cl.consumed_at < ?
     ORDER BY cl.consumed_at ASC");
-$stmt->execute([$current_date]);
+$stmt->execute($day_bounds);
 $log_entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $hasHistorical = false;
 foreach($log_entries as $entry) { if($entry['recipe_active'] === 0) $hasHistorical = true; }
 
-// Detailed Ingredient Fetcher
+// Ingredient breakdown, scaled to the totals captured at log time (see buildLoggedRecipeBreakdown)
 $recipe_breakdowns = [];
 foreach ($log_entries as $entry) {
-    if ($entry['recipe_id']) {
-        $stmt = $db->prepare("
-            SELECT ri.*, p.name as product_name, p.kj_per_100, p.protein_per_100, p.fat_per_100, p.carb_per_100, p.weight_per_ea
-            FROM recipe_ingredients ri
-            JOIN products p ON ri.product_id = p.id
-            WHERE ri.recipe_id = ?");
-        $stmt->execute([$entry['recipe_id']]);
-        $ingredients = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        $ratio = $entry['amount'] / ($entry['yield_serves'] ?: 1);
-        $breakdown = [];
-        $raw_cost_total = 0;
-        foreach ($ingredients as $ing) {
-            $ing_weight = ($ing['unit'] === 'ea') ? ($ing['amount'] * $ing['weight_per_ea']) : $ing['amount'];
-            $f = ($ing_weight / 0.1) * $ratio;
-            $cost = getUnitCost($db, $ing['product_id']) * $ing['amount'] * $ratio;
-            $raw_cost_total += $cost;
-            $breakdown[] = [
-                'name' => $ing['product_name'],
-                'amount' => $ing['amount'] * $ratio,
-                'unit' => $ing['unit'],
-                'kj' => round($f * $ing['kj_per_100']),
-                'p' => round($f * $ing['protein_per_100'], 1),
-                'f' => round($f * $ing['fat_per_100'], 1),
-                'c' => round($f * $ing['carb_per_100'], 1),
-                'cost' => $cost
-            ];
-        }
-        // Current ingredient prices give the split; scale it to the cost captured at log time so the rows sum to the entry
-        $entry_cost = $entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']);
-        if ($raw_cost_total > 0) {
-            foreach ($breakdown as &$b) $b['cost'] *= $entry_cost / $raw_cost_total;
-            unset($b);
-        }
-        $recipe_breakdowns[$entry['id']] = $breakdown;
-    }
+    if ($entry['recipe_id']) $recipe_breakdowns[$entry['id']] = buildLoggedRecipeBreakdown($db, $entry);
 }
 $page_title   = 'Daily Log';
 $page_context = 'log';
@@ -209,7 +176,7 @@ include '../core/page_head.php';
                                             <span class="color-cost">$<?= number_format($entry['amount'] * ($entry['unit_cost'] ?: $entry['last_unit_cost']), 2) ?></span>
                                         </div>
                                     </td>
-                            <td class="d-none d-md-table-cell text-center small"><?= $entry['amount'] ?><?= $entry['unit'] ?></td>
+                            <td class="d-none d-md-table-cell text-center small"><?= $entry['amount'] ?><?= htmlspecialchars((string)$entry['unit']) ?></td>
                             <td class="d-none d-md-table-cell text-center color-kj fw-bold"><?= number_format($entry['kj']) ?></td>
                             <td class="d-none d-md-table-cell text-center color-p fw-bold"><?= number_format($entry['protein'], 1) ?>g</td>
                             <td class="d-none d-md-table-cell text-center color-f fw-bold"><?= number_format($entry['fat'], 1) ?>g</td>
@@ -225,7 +192,7 @@ include '../core/page_head.php';
                             <tr class="child-row">
                                 <td></td><td class="text-center text-muted small"><i class="bi bi-arrow-return-right"></i></td>
                                 <td class="text-muted"><?= htmlspecialchars($ing['name']) ?></td>
-                                <td class="d-none d-md-table-cell text-center text-muted small"><?= $ing['amount'] < 0.1 ? number_format($ing['amount'], 3) : number_format($ing['amount'], 2) ?><?= $ing['unit'] ?></td>
+                                <td class="d-none d-md-table-cell text-center text-muted small"><?= $ing['amount'] < 0.1 ? number_format($ing['amount'], 3) : number_format($ing['amount'], 2) ?><?= htmlspecialchars((string)$ing['unit']) ?></td>
                                 <td class="d-none d-md-table-cell text-center color-kj small"><?= number_format($ing['kj']) ?></td>
                                 <td class="d-none d-md-table-cell text-center color-p small"><?= number_format($ing['p'], 1) ?>g</td>
                                 <td class="d-none d-md-table-cell text-center color-f small"><?= number_format($ing['f'], 1) ?>g</td>
