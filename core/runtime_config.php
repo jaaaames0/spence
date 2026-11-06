@@ -54,7 +54,7 @@ function spenceAuthCookieOptions(int $expires, string $path = '/spence/'): array
         'path' => $path,
         'secure' => true,
         'httponly' => true,
-        'samesite' => 'Strict',
+        'samesite' => 'Lax',
     ];
 }
 

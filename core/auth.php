@@ -62,6 +62,10 @@ if ($authenticated) {
         http_response_code(503);
         exit('This Spence account has not been set up yet.');
     }
+    // Reissue on page loads: slides the expiry and upgrades cookies set as SameSite=Strict.
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        setcookie($COOKIE_NAME, $cookie, spenceAuthCookieOptions(time() + $COOKIE_TTL));
+    }
 }
 
 if (!$authenticated) {
