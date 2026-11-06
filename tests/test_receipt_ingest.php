@@ -116,6 +116,19 @@ try {
     assertSameValue(0, $productId('Tuna Meal C'), 'Renamed product was duplicated under its old name');
     assertSameValue(5.0, (float)$db->query("SELECT SUM(current_qty) FROM inventory WHERE product_id = $c")->fetchColumn(), 'Old name did not resolve through the alias');
 
+    // ── Merging a fresh scan into an emptied product takes the new expiry ──
+    $yoghurt = fn(string $name, int $days) => receiptItem($name, 'Dairy', ['location' => 'Fridge', 'expiry_kind' => 'estimated', 'estimated_shelf_life_days' => $days]);
+    ingestAsJob($db, [$yoghurt('Yoghurt, Greek Old', 5)]);
+    $old = $productId('Yoghurt, Greek Old');
+    $db->exec("UPDATE inventory SET current_qty = 0, price_paid = 0, expiry_date = '" . $day(-40) . "' WHERE product_id = $old");
+    ingestAsJob($db, [$yoghurt('Yoghurt, Greek New', 10)]);
+    executeProductMerge($db, $productId('Yoghurt, Greek New'), $old);
+    $row = $db->query("SELECT current_qty, price_paid, expiry_date FROM inventory WHERE product_id = $old")->fetch(PDO::FETCH_ASSOC);
+    assertSameValue(['current_qty' => 1.0, 'price_paid' => 3.0, 'expiry_date' => $day(10)], ['current_qty' => (float)$row['current_qty'], 'price_paid' => (float)$row['price_paid'], 'expiry_date' => $row['expiry_date']], 'Merge into an emptied row kept its old expiry');
+    ingestAsJob($db, [$yoghurt('Yoghurt, Greek Newer', 0)]);
+    executeProductMerge($db, $productId('Yoghurt, Greek Newer'), $old);
+    assertSameValue($day(10), $db->query("SELECT expiry_date FROM inventory WHERE product_id = $old")->fetchColumn(), 'Undated merge wiped an in-stock expiry');
+
     // ── Merge choices: name, macros and unit conversion ─────────────────────
     ingestAsJob($db, [
         receiptItem('Choc Bar Each', 'Snacks/Confectionary', ['amount' => 4, 'weight_per_ea' => 0.05, 'kj_per_100' => 2000, 'protein_per_100' => 6]),

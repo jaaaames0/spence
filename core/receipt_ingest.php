@@ -66,16 +66,6 @@ function restockSpice(PDO $db, int $spiceId): void {
        ->execute([$spiceId]);
 }
 
-/**
- * Pick the expiry for stock being added to an existing inventory row. The newest purchase's date
- * wins: restocking usually happens when the old stock is low or gone, and with rotation the new
- * date is the relevant one almost immediately. Undated purchases leave in-stock dates alone.
- */
-function mergeInventoryExpiry(array $existing, array $incoming): array {
-    if ((float)$existing['current_qty'] <= 0.0001 || $incoming['date']) return $incoming;
-    return ['date' => $existing['expiry_date'] ?: null, 'source' => $existing['expiry_source']];
-}
-
 /** A live or merged product row by current name or a name it had before a rename or merge. */
 /**
  * The total printed on the receipt vs the sum of the extracted item prices, when they differ by more

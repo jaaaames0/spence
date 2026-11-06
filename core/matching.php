@@ -225,6 +225,16 @@ function convertMergeQuantity(float $qty, string $fromUnit, array $source, array
  * Fold $source_id into $target_id. The target keeps its id, unit and history; $macros picks whose
  * macros survive ('target', 'source' or 'blend') and $nameFrom whose name ('target' or 'source').
  */
+/**
+ * Pick the expiry for stock being added to an existing inventory row. The newest purchase's date
+ * wins: restocking usually happens when the old stock is low or gone, and with rotation the new
+ * date is the relevant one almost immediately. Undated purchases leave in-stock dates alone. Used by receipt restocks and product merges.
+ */
+function mergeInventoryExpiry(array $existing, array $incoming): array {
+    if ((float)$existing['current_qty'] <= 0.0001 || $incoming['date']) return $incoming;
+    return ['date' => $existing['expiry_date'] ?: null, 'source' => $existing['expiry_source']];
+}
+
 function executeProductMerge($db, $source_id, $target_id, string $macros = 'target', string $nameFrom = 'target') {
     // Joins a caller's transaction (bulk cleanup) rather than nesting one
     $ownsTransaction = !$db->inTransaction();
@@ -248,12 +258,21 @@ function executeProductMerge($db, $source_id, $target_id, string $macros = 'targ
             $stmt->execute([$source_id]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
                 $qty = convertMergeQuantity((float)$item['current_qty'], $item['unit'], $source, $target);
-                $bucket = $db->prepare("SELECT id FROM inventory WHERE product_id = ? AND location = ? AND unit = ? LIMIT 1");
+                $bucket = $db->prepare("SELECT id, current_qty, price_paid, expiry_date, expiry_source FROM inventory WHERE product_id = ? AND location = ? AND unit = ? ORDER BY current_qty > 0.0001 DESC, id ASC LIMIT 1");
                 $bucket->execute([$target_id, $item['location'], $target['base_unit']]);
-                $target_bucket_id = $bucket->fetchColumn();
-                if ($target_bucket_id) {
-                    $db->prepare("UPDATE inventory SET current_qty = current_qty + ?, price_paid = price_paid + ? WHERE id = ?")
-                       ->execute([$qty, $item['price_paid'], $target_bucket_id]);
+                $target_bucket = $bucket->fetch(PDO::FETCH_ASSOC);
+                if ($target_bucket) {
+                    // Like a receipt restock: an emptied target row starts afresh with the source's stock and expiry
+                    $depleted = (float)$target_bucket['current_qty'] <= 0.0001;
+                    $expiry = $qty > 0.0001
+                        ? mergeInventoryExpiry($target_bucket, ['date' => $item['expiry_date'] ?: null, 'source' => $item['expiry_source']])
+                        : ['date' => $target_bucket['expiry_date'], 'source' => $target_bucket['expiry_source']];
+                    $db->prepare("UPDATE inventory SET current_qty = ?, price_paid = ?, expiry_date = ?, expiry_source = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                       ->execute([
+                           ($depleted ? 0 : (float)$target_bucket['current_qty']) + $qty,
+                           ($depleted ? 0 : (float)$target_bucket['price_paid']) + (float)$item['price_paid'],
+                           $expiry['date'], $expiry['source'], $target_bucket['id'],
+                       ]);
                     $db->prepare("DELETE FROM inventory WHERE id = ?")->execute([$item['id']]);
                 } else {
                     $db->prepare("UPDATE inventory SET product_id = ?, current_qty = ?, unit = ? WHERE id = ?")
