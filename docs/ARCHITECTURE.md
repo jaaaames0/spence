@@ -150,7 +150,7 @@ The *by type* view folds products by the name before the comma ("Bacon, Streaky"
 
 ## Auth and tenancy
 
-- **Login.** You log in with an access key. The cookie holds an HMAC of a fixed string under that key, so there is no server-side session to expire. The cookie is scoped to `/spence/` and is `Secure`, `HttpOnly` and `SameSite=Strict`, with a one-year lifetime.
+- **Login.** You log in with an access key. The cookie holds an HMAC of a fixed string under that key, so there is no server-side session to expire. The cookie is scoped to `/spence/` and is `Secure`, `HttpOnly` and `SameSite=Lax` (Strict cookies are withheld when an installed PWA launches), with a one-year lifetime that renews on each page load.
 - **Tenants.** The original install is the *primary* tenant. Guests are `<id>.key` files in `SPENCE_TENANTS_DIR`, and their cookies are `<id>.<hmac>`. `spenceTenant()` gives the current tenant's database and upload paths to `get_db_connection()` and `spenceUploadDir()`.
 - **Guest limits.** Guests never get FORGE (`getForgeDbConnection()` returns null) or the shopping-list handoff. Guests scan only with their own `<id>.nanogpt` key.
 - **Provisioning.** Guests are created with `ops/spence-create-tenant.php`; see [DEPLOYMENT.md](../DEPLOYMENT.md#guest-tenants).

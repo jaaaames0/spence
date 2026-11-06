@@ -52,7 +52,7 @@ try {
     assertSameValue('/spence/', $cookie['path'], 'cookie scope');
     assertSameValue(true, $cookie['secure'], 'cookie secure flag');
     assertSameValue(true, $cookie['httponly'], 'cookie HttpOnly flag');
-    assertSameValue('Strict', $cookie['samesite'], 'cookie SameSite policy');
+    assertSameValue('Lax', $cookie['samesite'], 'cookie SameSite policy');
 
     echo "runtime config tests passed\n";
 } finally {
