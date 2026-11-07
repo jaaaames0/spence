@@ -97,31 +97,38 @@ function detectEnergyRegime(array $points): array {
     return ['label' => $direction, 'active_start' => $points[$activeStartIndex]['day'], 'segments' => $segments];
 }
 
-/** Refine a nearby Forge weight-cycle boundary using SPENCE's sustained intake shift. */
-function refineEnergyRegimeStartFromIntake(string $label, string $anchorDay, array $intake): string {
-    $bestDay = $anchorDay;
+/**
+ * The day in [$fromDay, $toDay] where the 7-day average intake steps up ($rising) or down the most,
+ * by at least 1500 kJ and 15%, or null when no day does.
+ */
+function findIntakeShiftDay(array $intake, string $fromDay, string $toDay, bool $rising): ?string {
+    $bestDay = null;
     $bestShift = 0.0;
-    $anchor = strtotime($anchorDay);
-    for ($offset = -7; $offset <= 7; $offset++) {
-        $candidate = $anchor + $offset * 86400;
+    for ($candidate = $fromDay; $candidate <= $toDay; $candidate = date('Y-m-d', strtotime("{$candidate} +1 day"))) {
         $before = $after = [];
         for ($dayOffset = 1; $dayOffset <= 7; $dayOffset++) {
-            $day = date('Y-m-d', $candidate - $dayOffset * 86400);
+            $day = date('Y-m-d', strtotime("{$candidate} -{$dayOffset} days"));
             if (isset($intake[$day])) $before[] = (float)$intake[$day];
         }
         for ($dayOffset = 0; $dayOffset < 7; $dayOffset++) {
-            $day = date('Y-m-d', $candidate + $dayOffset * 86400);
+            $day = date('Y-m-d', strtotime("{$candidate} +{$dayOffset} days"));
             if (isset($intake[$day])) $after[] = (float)$intake[$day];
         }
         if (count($before) < 4 || count($after) < 4) continue;
         $beforeAverage = array_sum($before) / count($before);
         $afterAverage = array_sum($after) / count($after);
-        $shift = $label === 'cut' ? $beforeAverage - $afterAverage : $afterAverage - $beforeAverage;
+        $shift = $rising ? $afterAverage - $beforeAverage : $beforeAverage - $afterAverage;
         if ($shift < 1500 || $shift / max(1, $beforeAverage) < 0.15 || $shift <= $bestShift) continue;
         $bestShift = $shift;
-        $bestDay = date('Y-m-d', $candidate);
+        $bestDay = $candidate;
     }
     return $bestDay;
+}
+
+/** Refine a nearby Forge weight-cycle boundary using SPENCE's sustained intake shift. */
+function refineEnergyRegimeStartFromIntake(string $label, string $anchorDay, array $intake): string {
+    return findIntakeShiftDay($intake, date('Y-m-d', strtotime("{$anchorDay} -7 days")), date('Y-m-d', strtotime("{$anchorDay} +7 days")), $label !== 'cut')
+        ?? $anchorDay;
 }
 
 /** Prefer a fresh Forge cycle hint, while retaining SPENCE's local detector as the fallback. */
@@ -141,6 +148,66 @@ function applyEnergyRegimeHint(array $detected, ?array $hint, array $intake, ?st
         'source' => $activeStart === $hintStart ? 'forge_cycle' : 'forge_cycle+intake',
         'cycle_start' => $hintStart,
     ];
+}
+
+/**
+ * The newest regime change in the saved plans: the current plan's regime and the date it took over,
+ * plus the regime it replaced. Null when the plans never changed regime. Plans with no known regime
+ * are ignored rather than treated as a change.
+ */
+function getPlanEnergyBoundary(PDO $db): ?array {
+    $rows = $db->query('SELECT regime, goal_type, goal_adjustment_kj, start_date, spence_local_date(created_at) AS created_day
+        FROM user_goals_history ORDER BY start_date, created_at, id')->fetchAll(PDO::FETCH_ASSOC);
+    $runs = [];
+    foreach ($rows as $row) {
+        $label = inferEnergyRegime($row['regime'], $row['goal_type'], $row['goal_adjustment_kj'] === null ? null : (float)$row['goal_adjustment_kj']);
+        if ($label === null) continue;
+        if ($runs && $runs[count($runs) - 1]['label'] === $label) continue;
+        $runs[] = ['label' => $label, 'start' => $row['start_date'], 'backdated' => $row['created_day'] !== null && $row['start_date'] < $row['created_day']];
+    }
+    if (count($runs) < 2) return null;
+    $current = $runs[count($runs) - 1];
+    return $current + ['previous' => $runs[count($runs) - 2]];
+}
+
+/**
+ * Start the current phase at a plan's regime change. The diet usually changes before the plan is
+ * saved, so the start moves to the sustained intake shift: within a week of a backdated plan date,
+ * or up to six weeks before one saved on the day. A plan overrides weight-only detection (whose
+ * post-change water swing can look like a reversal); a Forge cycle that started later still wins.
+ */
+function applyPlanEnergyBoundary(array $regime, ?array $boundary, array $intake, string $lookbackStart): array {
+    if (!$boundary) return $regime;
+    $rank = ['cut' => -1, 'maintenance' => 0, 'bulk' => 1];
+    $planStart = $boundary['start'];
+    $from = date('Y-m-d', strtotime($planStart . ($boundary['backdated'] ? ' -7 days' : ' -42 days')));
+    $from = max($from, date('Y-m-d', strtotime($boundary['previous']['start'] . ' +7 days')));
+    $to = date('Y-m-d', strtotime("{$planStart} +7 days"));
+    $activeStart = findIntakeShiftDay($intake, $from, $to, $rank[$boundary['label']] > $rank[$boundary['previous']['label']]) ?? $planStart;
+    if ($activeStart < $lookbackStart) return $regime;
+    if (str_starts_with($regime['source'] ?? '', 'forge_cycle') && $regime['active_start'] > $activeStart) return $regime;
+
+    // The phase being left began at its plan, or earlier when detection or Forge already dated it
+    $previousStart = $boundary['previous']['start'];
+    if (($regime['label'] ?? null) === $boundary['previous']['label'] && ($regime['active_start'] ?? $previousStart) < $previousStart) $previousStart = $regime['active_start'];
+    return [
+        'label' => $boundary['label'],
+        'active_start' => $activeStart,
+        'segments' => $regime['segments'] ?? [],
+        'source' => $activeStart === $planStart ? 'plan' : 'plan+intake',
+        'plan_start' => $planStart,
+        'previous' => ['label' => $boundary['previous']['label'], 'start' => $previousStart],
+    ];
+}
+
+/** The phase a plan change ended, as a maintenance estimate: its own window, after its transition. */
+function findPlanPriorEnergyEstimate(array $points, array $intake, array $excluded, array $regime): array {
+    $end = date('Y-m-d', strtotime($regime['active_start'] . ' -1 day'));
+    $start = getPostTransitionCalibrationStart($points, $regime['previous']['start'])['calibration_start'];
+    if ($start === null || $start > $end) return ['tdee' => null, 'regime' => null];
+    $window = calculateEnergyWindow($points, $intake, $excluded, $start, $end);
+    if ($window['confidence'] !== 'high') return ['tdee' => null, 'regime' => null];
+    return ['tdee' => $window['tdee'], 'regime' => ['label' => $regime['previous']['label'], 'start' => $start, 'end' => $end]];
 }
 
 /** Calculate one internally consistent intake/weight window. */
@@ -254,9 +321,10 @@ function getEnergyCalibration(PDO $db, int $lookbackDays = 180): array {
     $lastObservedWeightDay = $allPoints ? $allPoints[count($allPoints) - 1]['day'] : null;
     $includedIntake = array_diff_key($intake, $excluded);
     $regime = applyEnergyRegimeHint($detectedRegime, getForgeActiveEnergyRegime(), $includedIntake, $lastObservedWeightDay);
+    $regime = applyPlanEnergyBoundary($regime, getPlanEnergyBoundary($db), $includedIntake, $start);
     $phaseStart = $regime['active_start'] ?? $start;
     $calibrationStart = $phaseStart;
-    if (str_starts_with($regime['source'] ?? '', 'forge_cycle')) {
+    if (str_starts_with($regime['source'] ?? '', 'forge_cycle') || str_starts_with($regime['source'] ?? '', 'plan')) {
         $transition = getPostTransitionCalibrationStart($allPoints, $phaseStart);
         $regime['transition_end'] = $transition['transition_end'];
         $calibrationStart = $transition['calibration_start'];
@@ -270,7 +338,9 @@ function getEnergyCalibration(PDO $db, int $lookbackDays = 180): array {
         : ['tdee' => null, 'uncertainty' => null, 'avgIntake' => 0, 'slope' => null, 'coverage' => 0, 'calendarDays' => 0, 'points' => [], 'included' => [], 'confidence' => 'building'];
     extract($window);
 
-    $lastStable = findLastStableEnergyEstimate($historyPoints, $intake, $excluded, $phaseStart, $lookbackDays);
+    // A plan change dates the phase it ended, so measure that phase directly before searching history
+    $lastStable = isset($regime['previous']) ? findPlanPriorEnergyEstimate($historyPoints, $intake, $excluded, $regime) : ['tdee' => null];
+    if ($lastStable['tdee'] === null) $lastStable = findLastStableEnergyEstimate($historyPoints, $intake, $excluded, $phaseStart, $lookbackDays);
     $lastStableTdee = $lastStable['tdee'];
     $lastStableRegime = $lastStable['regime'];
     // Maintenance on a 20 MJ/day bulk says little about maintenance on a cut (and vice versa), so an
