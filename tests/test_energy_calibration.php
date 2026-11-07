@@ -153,4 +153,57 @@ try {
     foreach (['', '-wal', '-shm'] as $suffix) @unlink($planPath . $suffix);
 }
 
+// A rising intake step is found across a wide window; a flat one is not
+$stepIntake = [];
+for ($d = 0; $d < 40; $d++) $stepIntake[date('Y-m-d', strtotime("2026-10-01 +{$d} days"))] = $d < 17 ? 9400 : 14400;
+assertEnergyValue('2026-10-18', findIntakeShiftDay($stepIntake, '2026-10-05', '2026-11-05', true), 'The intake step up should date the change');
+assertEnergyValue(null, findIntakeShiftDay($stepIntake, '2026-10-05', '2026-11-05', false), 'A rise is not a step down');
+assertEnergyValue('2026-08-06', refineEnergyRegimeStartFromIntake('cut', '2026-08-04', $intake), 'Forge refinement should still find the step down');
+
+// A plan saved late moves back to the intake shift and overrides weight-only detection
+$boundary = ['label' => 'maintenance', 'start' => '2026-11-06', 'backdated' => false, 'previous' => ['label' => 'cut', 'start' => '2026-10-03']];
+$detected = ['label' => 'cut', 'active_start' => '2026-09-01', 'segments' => []];
+$regime = applyPlanEnergyBoundary($detected, $boundary, $stepIntake, '2026-05-01');
+assertEnergyValue('maintenance', $regime['label'], 'The plan regime should replace the detected cut');
+assertEnergyValue('2026-10-18', $regime['active_start'], 'A plan saved on the day should be dated by the intake shift');
+assertEnergyValue('plan+intake', $regime['source'], 'The refined plan boundary should expose its provenance');
+assertEnergyValue(['label' => 'cut', 'start' => '2026-09-01'], $regime['previous'], 'The cut being left should keep its detected start');
+$backdated = applyPlanEnergyBoundary($detected, ['backdated' => true, 'start' => '2026-11-01'] + $boundary, $stepIntake, '2026-05-01');
+assertEnergyValue('2026-11-01', $backdated['active_start'], 'A backdated plan only moves within a week of its date');
+assertEnergyValue('plan', $backdated['source'], 'An unrefined plan boundary should say so');
+$laterForge = ['label' => 'bulk', 'active_start' => '2026-11-02', 'segments' => [], 'source' => 'forge_cycle'];
+assertEnergyValue($laterForge, applyPlanEnergyBoundary($laterForge, $boundary, $stepIntake, '2026-05-01'), 'A Forge cycle newer than the plan should win');
+assertEnergyValue($detected, applyPlanEnergyBoundary($detected, $boundary, $stepIntake, '2026-11-01'), 'A boundary before the lookback should be ignored');
+
+// End to end: a long cut, then maintenance from 30 days ago, with the plan only saved 2 days ago
+$calPath = tempnam(sys_get_temp_dir(), 'spence-cal-test-');
+try {
+    (new PDO('sqlite:' . $calPath))->exec(file_get_contents(__DIR__ . '/../database/schema.sql'));
+    $calDb = get_db_connection($calPath);
+    $calDb->exec("INSERT INTO user_profiles (id, name, activity_rate) VALUES (1, 'Test', 1.55)");
+    $ago = fn(int $days): string => date('Y-m-d', strtotime("-{$days} days"));
+    $log = $calDb->prepare('INSERT INTO consumption_log (name, kj, consumed_at) VALUES (?, ?, ?)');
+    $weigh = $calDb->prepare('INSERT INTO user_vitals_history (user_id, weight_kg, body_fat_pct, recorded_at) VALUES (1, ?, 20, ?)');
+    for ($d = 120; $d >= 1; $d--) {
+        $day = $ago($d);
+        $log->execute(['Food', $d > 30 ? 9000 + ($d % 2 ? 200 : -200) : 14000, "{$day} 02:00:00"]);
+        // -0.5 kg/week on the cut, then a 1.2 kg water regain over the first 10 maintenance days
+        $weight = $d > 30 ? 95 - (120 - $d) * 0.5 / 7 : 95 - 90 * 0.5 / 7 + min(30 - $d, 10) * 0.12;
+        if ($d % 2 === 0) $weigh->execute([$weight + ($d % 4 ? 0.1 : -0.1), "{$day} 02:00:00"]);
+    }
+    $plan = $calDb->prepare("INSERT INTO user_goals_history (user_id, goal_type, target_kj, regime, goal_adjustment_kj, start_date, created_at) VALUES (1, 'Custom', ?, ?, ?, ?, ?)");
+    $plan->execute([9000, 'cut', -5000, $ago(120), $ago(120) . ' 02:00:00']);
+    $plan->execute([14000, 'maintenance', 0, $ago(2), $ago(2) . ' 02:00:00']);
+
+    $calibration = getEnergyCalibration($calDb);
+    assertEnergyValue('maintenance', $calibration['regime']['label'], 'The saved maintenance plan should set the regime');
+    assertEnergyValue($ago(30), $calibration['regime']['active_start'], 'The phase should start where intake changed, not when the plan was saved');
+    assertEnergyValue($ago(16), $calibration['regime']['transition_end'], 'The first 14 maintenance days should be transition-only');
+    assertEnergyValue('cut', $calibration['lastStableRegime']['label'] ?? null, 'The cut the plan ended should supply the prior estimate');
+    // 9000 kJ/day at -0.5 kg/week is about 11,290 kJ/day maintenance
+    assertEnergyValue(true, abs($calibration['lastStableTdee'] - 11290) < 300, 'The cut estimate should come from the cut window only, got ' . $calibration['lastStableTdee']);
+} finally {
+    foreach (['', '-wal', '-shm'] as $suffix) @unlink($calPath . $suffix);
+}
+
 echo "Energy calibration tests passed\n";

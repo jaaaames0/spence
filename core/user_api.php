@@ -119,10 +119,13 @@ try {
         $targetKj = (float)$_POST['target_kj'];
         $regime = $adjustment < 0 ? 'cut' : ($adjustment > 0 ? 'bulk' : 'maintenance');
         $maintenanceKj = (float)($_POST['maintenance_kj'] ?? ($targetKj - $adjustment));
+        // A plan can be backdated to when the diet actually changed, never into the future
+        $startDate = $_POST['start_date'] ?? '';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate) || $startDate > date('Y-m-d')) $startDate = date('Y-m-d');
         $maintenanceSource = $_POST['maintenance_source'] ?? 'plan_snapshot';
         if (!in_array($maintenanceSource, ['current_observed', 'prior_observed', 'formula'], true)) $maintenanceSource = 'plan_snapshot';
         $db->prepare('INSERT INTO user_goals_history (user_id, goal_type, target_kj, target_protein_g, target_fat_g, target_carb_g, cost_limit_daily, regime, maintenance_kj, goal_adjustment_kj, training_adjustment_kj, maintenance_source, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-           ->execute([$userId, $_POST['goal_type'] ?? 'Custom', $targetKj, (float)$_POST['p'], (float)$_POST['f'], (float)$_POST['c'], $weeklyBudget / 7, $regime, $maintenanceKj, $adjustment, $trainingAdjustment, $maintenanceSource, date('Y-m-d')]);
+           ->execute([$userId, $_POST['goal_type'] ?? 'Custom', $targetKj, (float)$_POST['p'], (float)$_POST['f'], (float)$_POST['c'], $weeklyBudget / 7, $regime, $maintenanceKj, $adjustment, $trainingAdjustment, $maintenanceSource, $startDate]);
         $db->commit();
         echo json_encode(['status' => 'success']);
     }
