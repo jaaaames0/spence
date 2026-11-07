@@ -28,6 +28,14 @@ $extra_styles = '<style>
     .btn-dismiss:hover { background: #2a2a2a; color: #f44336; border-color: #f44336; }
     .btn-primary-spence { background: #6c757d; color: #fff; font-weight: bold; border: none; }
     .btn-primary-spence:hover { background: #5a6268; }
+    #mergeCard { scroll-margin-top: 7rem; }
+    /* Same columns as the .merge-grid comparison below, so each picker sits over its product */
+    .merge-pickers { display: grid; grid-template-columns: 5.5rem 1fr 1fr; grid-template-areas: "swap source target"; gap: 4px 10px; align-items: end; padding: 0 13px; }
+    .merge-pick-source { grid-area: source; } .merge-pick-target { grid-area: target; } .merge-pick-swap { grid-area: swap; }
+    @media (max-width: 575px) {
+        .merge-pickers { grid-template-columns: 1fr; grid-template-areas: "source" "swap" "target"; }
+        .merge-pick-swap { text-align: center; }
+    }
 </style>';
 include '../core/page_head.php';
 ?>
@@ -44,30 +52,35 @@ include '../core/page_head.php';
 
         <div class="row g-4">
             <div class="col-lg-8">
-                <div class="card p-4 mb-4">
-                    <h6 class="text-muted uppercase small mb-3 fw-bold">Manual Force Merge</h6>
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-4">
-                            <label class="small text-muted mb-1 uppercase fw-bold">Source (Messy)</label>
+                <div class="card p-4 mb-4" id="mergeCard">
+                    <h6 class="text-muted uppercase small mb-3 fw-bold">Merge Products</h6>
+                    <div class="merge-pickers mb-3">
+                        <div class="merge-pick-source">
+                            <label class="small text-muted mb-1 uppercase fw-bold" for="mergeSourceName">Merge this</label>
                             <div class="position-relative">
-                                <input type="text" id="manualSourceName" class="form-control" placeholder="Search products...">
-                                <div id="manualSourceList" class="product-search-list dropdown-style"></div>
+                                <input type="text" id="mergeSourceName" class="form-control" placeholder="Search products..." autocomplete="off">
+                                <div id="mergeSourceList" class="product-search-list dropdown-style"></div>
                             </div>
-                            <input type="hidden" id="manualSource">
                         </div>
-                        <div class="col-md-1 text-center pb-2">
-                            <i class="bi bi-arrow-right h4 text-muted"></i>
+                        <div class="merge-pick-swap">
+                            <button type="button" class="btn btn-outline-secondary" onclick="swapMerge()" title="Swap sides"><i class="bi bi-arrow-left-right"></i></button>
                         </div>
-                        <div class="col-md-4">
-                            <label class="small text-muted mb-1 uppercase fw-bold">Target (Canonical)</label>
+                        <div class="merge-pick-target">
+                            <label class="small text-muted mb-1 uppercase fw-bold" for="mergeTargetName">Into this</label>
                             <div class="position-relative">
-                                <input type="text" id="manualTargetName" class="form-control" placeholder="Search products...">
-                                <div id="manualTargetList" class="product-search-list dropdown-style"></div>
+                                <input type="text" id="mergeTargetName" class="form-control" placeholder="Search products..." autocomplete="off">
+                                <div id="mergeTargetList" class="product-search-list dropdown-style"></div>
                             </div>
-                            <input type="hidden" id="manualTarget">
                         </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-primary-spence w-100 fw-bold py-2" onclick="forceMerge()">MERGE PRODUCTS</button>
+                    </div>
+                    <div id="mergePanel" class="d-none">
+                        <p class="text-muted small mb-2">The right-hand product survives with its id, unit and history; pick which name and macros it keeps.</p>
+                        <div id="mergeList"></div>
+                        <div id="mergeSame" class="small mt-2 d-none" style="color:#ff9800;">Pick two different products.</div>
+                        <div class="d-flex gap-2 mt-3">
+                            <button type="button" class="btn btn-outline-secondary fw-bold" onclick="clearMerge()">CLEAR</button>
+                            <button type="button" class="btn btn-dismiss fw-bold flex-grow-1 d-none" id="mergeDismissBtn" onclick="dismissReviewed()">NOT THE SAME</button>
+                            <button type="button" class="btn btn-primary-spence fw-bold flex-grow-1" id="mergeApplyBtn" onclick="applyReviewed()" disabled>MERGE</button>
                         </div>
                     </div>
                 </div>
@@ -129,91 +142,103 @@ include '../core/page_head.php';
         </div>
     </div>
 
-    <div class="modal fade" id="mergeModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title fw-black uppercase">Review Merge</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="text-muted small mb-3">The right-hand product survives with its id, unit and history; pick which name and macros it keeps. Swap sides to keep the other one.</p>
-                    <div id="mergeList"></div>
-                </div>
-                <div class="modal-footer border-0 d-flex gap-2">
-                    <button type="button" class="btn btn-outline-secondary fw-bold" onclick="swapMerge()"><i class="bi bi-arrow-left-right me-1"></i>SWAP SIDES</button>
-                    <button type="button" class="btn btn-dismiss fw-bold flex-grow-1" id="mergeDismissBtn" onclick="dismissReviewed()">NOT THE SAME</button>
-                    <button type="button" class="btn btn-primary-spence fw-bold flex-grow-1" onclick="applyReviewed()">MERGE</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
     const mergeProducts = <?= json_encode(array_map(fn($p) => ['id' => (int)$p['id'], 'name' => $p['name']], $products)) ?>;
-    ['Source', 'Target'].forEach(key => {
-        const input = document.getElementById(`manual${key}Name`);
-        const idField = document.getElementById(`manual${key}`);
-        const list = document.getElementById(`manual${key}List`);
+    // The pair on screen: productMergePreview() rows (null until picked) and the suggestion's engine reason
+    const merging = { source: null, target: null, reason: '' };
+    let reviewer = null;
+    const sides = {};
+
+    ['source', 'target'].forEach(side => {
+        const key = side === 'source' ? 'Source' : 'Target';
+        const input = document.getElementById(`merge${key}Name`);
+        const list = document.getElementById(`merge${key}List`);
+        sides[side] = input;
         attachProductSearch({
             input, list,
             products: mergeProducts,
             meta: p => `<span class="text-muted small">#${p.id}</span>`,
-            onSelect: p => {
+            onSelect: async p => {
                 input.value = p.name;
-                idField.value = p.id;
-                if (key === 'Source') document.getElementById('manualTargetName').focus();
+                merging.reason = '';
+                merging[side] = await loadPreview(p.id);
+                renderReview();
+                if (side === 'source' && !merging.target) sides.target.focus();
             },
         });
-        input.addEventListener('input', () => { idField.value = ''; });
+        // Editing the name un-picks that side
+        input.addEventListener('input', () => {
+            if (!merging[side]) return;
+            merging[side] = null;
+            merging.reason = '';
+            renderReview();
+        });
         input.addEventListener('blur', () => setTimeout(() => { list.style.display = 'none'; }, 150));
     });
 
-    const mergeModal = new bootstrap.Modal(document.getElementById('mergeModal'));
-    let reviewing = null;
-
-    async function reviewMerge(sourceId, targetId, reason = '') {
+    async function loadPreview(...ids) {
         const data = new FormData();
         data.append('action', 'merge_preview');
-        data.append('ids', `${sourceId},${targetId}`);
-        const res = await fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson);
+        data.append('ids', ids.join(','));
+        const res = await fetch('../core/api.php', { method: 'POST', body: data }).then(spenceJson).catch(() => ({}));
         const byId = Object.fromEntries((res.products || []).map(p => [p.id, p]));
-        if (!byId[sourceId] || !byId[targetId]) return alert('Could not load those products.');
-        reviewing = { source: byId[sourceId], target: byId[targetId], reason };
-        renderReview();
-        mergeModal.show();
+        return ids.length === 1 ? byId[ids[0]] || null : byId;
     }
 
     function renderReview() {
-        const { source, target, reason } = reviewing;
-        reviewing.reviewer = mergeReview(document.getElementById('mergeList'),
-            [{ source_id: source.id, target_id: target.id, source, target, reason, active: true }]);
+        const { source, target, reason } = merging;
+        const both = source && target, same = both && source.id === target.id;
+        document.getElementById('mergePanel').classList.toggle('d-none', !source && !target);
+        reviewer = mergeReview(document.getElementById('mergeList'),
+            [{ source_id: source?.id, target_id: target?.id, source, target, reason, active: !same }],
+            { sourceLabel: '', targetLabel: '', toggle: false });
+        document.getElementById('mergeSame').classList.toggle('d-none', !same);
+        document.getElementById('mergeApplyBtn').disabled = !both || same;
         // Dismissing only makes sense for a suggested pair
-        document.getElementById('mergeDismissBtn').classList.toggle('d-none', !reason);
+        document.getElementById('mergeDismissBtn').classList.toggle('d-none', !(both && reason));
+    }
+
+    // Suggestion rows load their pair into the merge card
+    async function reviewMerge(sourceId, targetId, reason = '') {
+        const byId = await loadPreview(sourceId, targetId);
+        if (!byId[sourceId] || !byId[targetId]) return alert('Could not load those products.');
+        Object.assign(merging, { source: byId[sourceId], target: byId[targetId], reason });
+        sides.source.value = merging.source.name;
+        sides.target.value = merging.target.name;
+        renderReview();
+        document.getElementById('mergeCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function swapMerge() {
-        [reviewing.source, reviewing.target] = [reviewing.target, reviewing.source];
+        [merging.source, merging.target] = [merging.target, merging.source];
+        [sides.source.value, sides.target.value] = [sides.target.value, sides.source.value];
         renderReview();
     }
 
+    function clearMerge() {
+        Object.assign(merging, { source: null, target: null, reason: '' });
+        sides.source.value = sides.target.value = '';
+        renderReview();
+        sides.source.focus();
+    }
+
     async function applyReviewed() {
-        const failures = await reviewing.reviewer.apply();
-        if (failures.length) return alert(failures.join('\n'));
+        const btn = document.getElementById('mergeApplyBtn');
+        btn.disabled = true;
+        btn.innerText = 'MERGING...';
+        const failures = await reviewer.apply();
+        if (failures.length) {
+            btn.disabled = false;
+            btn.innerText = 'MERGE';
+            return alert(failures.join('\n'));
+        }
         location.reload();
     }
 
     function dismissReviewed() {
-        dismiss(reviewing.source.id, reviewing.target.id);
+        dismiss(merging.source.id, merging.target.id);
     }
 
-    function forceMerge() {
-        const sourceId = document.getElementById('manualSource').value;
-        const targetId = document.getElementById('manualTarget').value;
-        if (!sourceId || !targetId) return alert('Select both products.');
-        if (sourceId === targetId) return alert('Cannot merge a product into itself.');
-        reviewMerge(+sourceId, +targetId);
-    }
     function dismiss(idA, idB) {
         const data = new FormData();
         data.append('action', 'dismiss_dedupe_pair');

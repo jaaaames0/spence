@@ -121,11 +121,13 @@ function attachProductSearch({ input, list, products, onSelect, meta = null, lim
  * which name and macros survive. The target always survives with its id and unit.
  *   container    — element the cards render into
  *   pairs        — [{ source_id, target_id, source_name, reason, source, target }], where
- *                  source/target are productMergePreview() rows
- *   sourceLabel, targetLabel — column headings
+ *                  source/target are productMergePreview() rows; either may be null while a
+ *                  product is still being picked (its column shows dashes and the pair can't merge)
+ *   sourceLabel, targetLabel — column headings ('' for none)
+ *   toggle       — show the per-pair "Same product" tick (off when the page itself is the decision)
  * Returns { apply({ dismissUnticked }) } which merges ticked pairs and resolves to failure messages.
  */
-function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel = 'Into this' } = {}) {
+function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel = 'Into this', toggle = true } = {}) {
     const state = pairs.map(p => ({ ...p, active: !!p.active, name: 'target', macros: 'target' }));
     const num = n => (Math.round(n * 10) / 10).toString();
     const unit = p => p.base_unit === 'ea' ? `each (${num(p.weight_per_ea * 1000)} g)` : `per ${escHtml(p.base_unit)}`;
@@ -138,38 +140,50 @@ function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel
 
     function render() {
         container.innerHTML = state.map((m, i) => {
-            const s = m.source, t = m.target, warn = differ(s, t) ? 'merge-differ' : '';
-            const choice = (field, value, label) => `
+            const s = m.source, t = m.target, both = s && t, warn = both && differ(s, t) ? 'merge-differ' : '';
+            const blank = '<div class="merge-info text-muted">—</div>';
+            // Choices only make sense with both sides; until then each side just shows its product
+            const choice = (field, value, label) => {
+                const p = value === 'source' ? s : value === 'target' ? t : both;
+                if (!p) return value === 'blend' ? '' : blank;
+                if (!both) return `<div class="merge-info">${label}</div>`;
+                return `
                 <label class="merge-choice ${m[field] === value ? 'chosen' : ''}">
                     <input type="radio" name="${field}-${i}" data-i="${i}" data-field="${field}" value="${value}" ${m[field] === value ? 'checked' : ''}>
                     <span>${label}</span>
                 </label>`;
-            const unitNote = s.base_unit === t.base_unit ? '' : `<div class="small mt-2" style="color:#ff9800;"><i class="bi bi-arrow-left-right me-1"></i>Different units: stock converts to ${escHtml(unit(t))}${s.base_unit === 'ea' ? ` at ${num(s.weight_per_ea * 1000)} g each` : ''}.</div>`;
-            return `
-            <div class="merge-review ${m.active ? 'active' : ''}">
+            };
+            const info = (p, fn) => p ? `<div class="merge-info">${fn(p)}</div>` : blank;
+            const head = toggle ? `
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <input class="form-check-input m-0" type="checkbox" id="merge-${i}" data-i="${i}" ${m.active ? 'checked' : ''} style="width:22px;height:22px;flex-shrink:0;">
                     <label for="merge-${i}" class="fw-bold flex-grow-1">Same product</label>
                     ${m.reason ? `<span class="badge bg-secondary opacity-75 small">${escHtml(m.reason)}</span>` : ''}
-                </div>
-                <div class="merge-grid">
+                </div>` : m.reason ? `<div class="mb-2"><span class="badge bg-secondary opacity-75 small">${escHtml(m.reason)}</span></div>` : '';
+            const heads = sourceLabel || targetLabel ? `
                     <div class="merge-gap"></div>
                     <div class="merge-head">${escHtml(sourceLabel)}</div>
-                    <div class="merge-head">${escHtml(targetLabel)}</div>
+                    <div class="merge-head">${escHtml(targetLabel)}</div>` : '';
+            const unitNote = !both || s.base_unit === t.base_unit ? '' : `<div class="small mt-2" style="color:#ff9800;"><i class="bi bi-arrow-left-right me-1"></i>Different units: stock converts to ${escHtml(unit(t))}${s.base_unit === 'ea' ? ` at ${num(s.weight_per_ea * 1000)} g each` : ''}.</div>`;
+            return `
+            <div class="merge-review ${m.active && both ? 'active' : ''}">
+                ${head}
+                <div class="merge-grid">
+                    ${heads}
                     <div class="merge-label">Name</div>
-                    ${choice('name', 'source', escHtml(s.name))}
-                    ${choice('name', 'target', escHtml(t.name))}
+                    ${choice('name', 'source', s && escHtml(s.name))}
+                    ${choice('name', 'target', t && escHtml(t.name))}
                     <div class="merge-label">Macros <span class="fw-normal">/100 g</span></div>
-                    ${choice('macros', 'source', `<span class="${warn}">${macros(s)}</span>`)}
-                    ${choice('macros', 'target', `<span class="${warn}">${macros(t)}</span>`)}
-                    <div class="merge-gap"></div>
-                    <div class="merge-span">${choice('macros', 'blend', 'Average of both')}</div>
+                    ${choice('macros', 'source', s && `<span class="${warn}">${macros(s)}</span>`)}
+                    ${choice('macros', 'target', t && `<span class="${warn}">${macros(t)}</span>`)}
+                    ${both ? `<div class="merge-gap"></div>
+                    <div class="merge-span">${choice('macros', 'blend', 'Average of both')}</div>` : ''}
                     <div class="merge-label">Unit</div>
-                    <div class="merge-info">${escHtml(unit(s))}</div>
-                    <div class="merge-info">${escHtml(unit(t))}</div>
+                    ${info(s, p => escHtml(unit(p)))}
+                    ${info(t, p => escHtml(unit(p)))}
                     <div class="merge-label">Used</div>
-                    <div class="merge-info">${escHtml(use(s))}</div>
-                    <div class="merge-info">${escHtml(use(t))}</div>
+                    ${info(s, p => escHtml(use(p)))}
+                    ${info(t, p => escHtml(use(p)))}
                 </div>
                 ${unitNote}
             </div>`;
@@ -197,6 +211,7 @@ function mergeReview(container, pairs, { sourceLabel = 'Merge this', targetLabel
         const failures = [];
         const merged = new Set();
         for (const m of state) {
+            if (!m.source || !m.target) continue;
             if (m.active) {
                 // A product only merges once; a second tick for it would point at a merged product
                 if (merged.has(m.source_id)) continue;
