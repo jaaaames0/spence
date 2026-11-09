@@ -284,3 +284,19 @@ async function shrinkPhoto(file, maxEdge) {
         return file;
     }
 }
+
+// Follow the device's time zone: when it differs from the tenant's current one (and the zone is
+// automatic), the server starts a new period from now; earlier entries keep their days. Pages
+// with a query string may be mid-flow (?scan=1 has already taken its photo handoff), so only a
+// plain page reloads to show the new "today"; the rest pick it up on the next page.
+document.addEventListener('DOMContentLoaded', () => {
+    const root = document.documentElement;
+    let detected = '';
+    try { detected = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return; }
+    if (!root.dataset.tz || root.dataset.tzSource !== 'auto' || !detected || detected === root.dataset.tz) return;
+    if (detected === 'UTC' || detected.startsWith('Etc/')) return;
+    fetch('/spence/core/user_api.php', { method: 'POST', body: new URLSearchParams({ action: 'set_timezone', mode: 'detected', tz: detected }) })
+        .then(spenceJson)
+        .then(res => { if (res.changed && !location.search) location.reload(); })
+        .catch(() => {});
+});

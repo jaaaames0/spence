@@ -103,6 +103,12 @@ CREATE TABLE waste_log (
             value REAL NOT NULL DEFAULT 0,
             wasted_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+CREATE TABLE timezone_periods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            effective_from DATETIME NOT NULL,
+            tz TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'auto' CHECK(source IN ('auto', 'manual'))
+        );
 CREATE INDEX idx_consumption_log_consumed_at ON consumption_log(consumed_at);
 CREATE INDEX idx_consumption_log_product_id ON consumption_log(product_id);
 CREATE INDEX idx_inventory_product_location ON inventory(product_id, location);

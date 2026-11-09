@@ -9,7 +9,7 @@
  */
 ?>
 <!DOCTYPE html>
-<html lang="en" data-context="<?= htmlspecialchars($page_context) ?>">
+<html lang="en" data-context="<?= htmlspecialchars($page_context) ?>"<?php if (function_exists('spenceTimeline')): ?> data-tz="<?= htmlspecialchars(spenceTimeline()->currentZone()->getName()) ?>" data-tz-source="<?= htmlspecialchars(spenceTimeline()->currentSource()) ?>"<?php endif; ?>>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/spence/core/spence.css?v=5">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/spence/core/spence.js?v=5"></script>
+    <script src="/spence/core/spence.js?v=6"></script>
     <?= $extra_head ?? '' ?>
     <?= $extra_styles ?? '' ?>
 </head>
