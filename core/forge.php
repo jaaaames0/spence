@@ -29,8 +29,31 @@ function getForgeExportPath(): array {
         return ['path' => $runtimePath, 'requires_contract' => true];
     }
 
-    // The sibling database fallback is for a local development checkout only.
-    return ['path' => $siblingPath, 'requires_contract' => false];
+    // The sibling checkout fallback is for local development only. Forge's live database stores
+    // UTC, so read the same projection Forge publishes, built by Forge's own builder.
+    return ['path' => buildForgeDevProjection($siblingPath), 'requires_contract' => false];
+}
+
+/**
+ * Development only: build the v1 projection of a sibling Forge checkout's database with that
+ * checkout's core/spence_export.php (which also copes with a snapshot not yet migrated to UTC),
+ * once per request. Returns '' when there is no checkout or the build fails.
+ */
+function buildForgeDevProjection(string $forgeDb): string {
+    static $built = [];
+    if (isset($built[$forgeDb])) return $built[$forgeDb];
+    $builder = dirname($forgeDb, 2) . '/core/spence_export.php';
+    if (!is_readable($forgeDb) || !is_readable($builder)) return $built[$forgeDb] = '';
+    try {
+        require_once $builder;
+        $target = sys_get_temp_dir() . '/spence-forge-dev-' . bin2hex(random_bytes(6)) . '.db';
+        register_shutdown_function(static function () use ($target) { @unlink($target); });
+        forge_build_spence_export($forgeDb, $target);
+        return $built[$forgeDb] = $target;
+    } catch (Throwable $e) {
+        reportForgeIntegrationFailure('development projection could not be built');
+        return $built[$forgeDb] = '';
+    }
 }
 
 function getForgeDbConnection(): ?PDO {
@@ -85,7 +108,10 @@ function getForgeDbConnection(): ?PDO {
     }
 }
 
-/** Return FORGE readings. Forge stores its SQLite timestamps as Australia/Sydney local wall time. */
+/**
+ * Return FORGE readings. The projection's timestamps are local wall time: Forge stores UTC and
+ * converts each through its own time zone history when it publishes.
+ */
 function getForgeVitalsHistory(): array {
     $forge = getForgeDbConnection();
     if (!$forge) return [];

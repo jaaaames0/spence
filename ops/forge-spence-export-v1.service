@@ -9,7 +9,11 @@ Type=oneshot
 User=forge
 Group=forge
 UMask=0027
-ExecStart=/usr/local/libexec/forge-spence-export-v1
+# FORGE owns the publisher (ops/spence-export-v1.php in each FORGE release): it converts FORGE's
+# UTC timestamps to local wall time. pcre.jit=0 because of MemoryDenyWriteExecute below;
+# LD_LIBRARY_PATH works around this host's PHP CLI sqlite loader conflict.
+Environment=LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
+ExecStart=/usr/bin/php -d pcre.jit=0 /usr/local/lib/forge/current/ops/spence-export-v1.php
 
 NoNewPrivileges=yes
 PrivateDevices=yes
