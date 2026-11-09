@@ -60,6 +60,31 @@ try {
     touch($path);
     assertForgeValue(null, getForgeDbConnection(), 'Stale export metadata was accepted');
 
+    // Development fallback: a sibling Forge checkout stores UTC; Spence must read the projection
+    // Forge's own builder makes (local wall time), not the raw columns. Needs the sibling checkout.
+    $forgeCheckout = dirname(__DIR__, 2) . '/forge';
+    if (is_readable($forgeCheckout . '/core/spence_export.php')) {
+        $dev = sys_get_temp_dir() . '/spence-forge-dev-test-' . bin2hex(random_bytes(4));
+        mkdir($dev . '/database', 0700, true);
+        symlink($forgeCheckout . '/core', $dev . '/core');
+        $forge = new PDO('sqlite:' . $dev . '/database/forge.db');
+        $forge->exec(file_get_contents($forgeCheckout . '/database/schema.sql'));
+        $forge->exec("INSERT INTO training_eras (id, name, starts_at, is_active) VALUES (1, 'Current', '2026-11-01 00:00:00', 1);
+            INSERT INTO workouts (started_at, finished_at, bodyweight_kg, era_id) VALUES ('2026-11-20 21:30:00', '2026-11-20 22:40:00', 81.5, 1);");
+        unset($forge);
+        try {
+            $projection = new PDO('sqlite:' . buildForgeDevProjection($dev . '/database/forge.db'));
+            // 21:30 UTC on the 20th is 08:30 Sydney daylight time on the 21st.
+            assertForgeValue(['2026-11-21 08:30:00', 70], $projection->query('SELECT started_at, CAST(ROUND((julianday(finished_at) - julianday(started_at)) * 1440) AS INTEGER) FROM workouts')->fetch(PDO::FETCH_NUM), 'Development projection was not local wall time');
+            assertForgeValue('', buildForgeDevProjection($dev . '/missing/forge.db'), 'A missing sibling database should give no projection');
+        } finally {
+            unset($projection);
+            foreach (['/database/forge.db', '/database/forge.db-wal', '/database/forge.db-shm', '/core'] as $file) @unlink($dev . $file);
+            @rmdir($dev . '/database');
+            @rmdir($dev);
+        }
+    }
+
     echo "Forge export tests passed\n";
 } finally {
     putenv('FORGE_DB_PATH');

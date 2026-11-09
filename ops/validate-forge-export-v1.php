@@ -1,5 +1,15 @@
 <?php
-/** Compare the production Forge projection with its live source without printing records. */
+/**
+ * Compare the published Forge projection with a fresh build of the same projection from Forge's
+ * live database, without printing records. Forge stores UTC and converts to local wall time when
+ * it publishes, so the expected projection comes from Forge's own builder (its deployed release,
+ * or FORGE_RELEASE_DIR), not from raw source columns.
+ *
+ *   sudo -u forge-web env LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu php ops/validate-forge-export-v1.php
+ *
+ * FORGE_LIVE_DB and FORGE_EXPORT_PATH override the two databases (for testing).
+ * A Forge write between the last publish and this run shows as a FAIL; run it again.
+ */
 declare(strict_types=1);
 
 function openValidationDb(string $dsn): PDO {
@@ -25,8 +35,16 @@ function compareValidationQuery(string $name, PDO $source, PDO $export, string $
     return $matches;
 }
 
-$source = openValidationDb('sqlite:/var/lib/forge/forge.db');
-$export = openValidationDb('sqlite:file:/var/lib/forge/exports/spence-v1.db?mode=ro&immutable=1');
+$forgeRelease = getenv('FORGE_RELEASE_DIR') ?: '/usr/local/lib/forge/current';
+require_once $forgeRelease . '/core/spence_export.php';
+$expectedPath = sys_get_temp_dir() . '/spence-forge-validate-' . bin2hex(random_bytes(6)) . '.db';
+register_shutdown_function(static function () use ($expectedPath) { @unlink($expectedPath); });
+$liveDb = getenv('FORGE_LIVE_DB') ?: '/var/lib/forge/forge.db';
+$exportPath = getenv('FORGE_EXPORT_PATH') ?: '/var/lib/forge/exports/spence-v1.db';
+forge_build_spence_export($liveDb, $expectedPath);
+
+$source = openValidationDb('sqlite:' . $expectedPath);
+$export = openValidationDb('sqlite:file:' . $exportPath . '?mode=ro&immutable=1');
 $ok = true;
 
 $queries = [
