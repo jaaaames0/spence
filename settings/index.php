@@ -215,6 +215,14 @@ include '../core/page_head.php';
                 <a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=backup">JSON BACKUP</a>
                 <div class="btn-group"><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=inventory&amp;format=csv">INVENTORY CSV</a><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=consumption&amp;format=csv">LOG CSV</a><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=recipes&amp;format=csv">RECIPES CSV</a><a class="btn btn-outline-secondary btn-sm fw-bold" href="../core/export.php?type=vitals&amp;format=csv">VITALS CSV</a></div>
             </div>
+            <?php $tzName = spenceTimeline()->currentZone()->getName(); $tzManual = spenceTimeline()->currentSource() === 'manual'; ?>
+            <div class="d-flex align-items-center gap-2 mt-3 small text-muted">
+                <label for="tzSelect" class="mb-0">Time zone</label>
+                <select id="tzSelect" class="form-select form-select-sm w-auto" style="background-color:#171717;color:#aaa;border-color:#333;" onchange="setTimezone(this.value)">
+                    <option value=""<?= $tzManual ? '' : ' selected' ?>>Automatic<?= $tzManual ? ' (follow this device)' : ' · ' . htmlspecialchars($tzName) ?></option>
+                    <?php foreach (DateTimeZone::listIdentifiers() as $zone): ?><option value="<?= htmlspecialchars($zone) ?>"<?= $tzManual && $zone === $tzName ? ' selected' : '' ?>><?= htmlspecialchars($zone) ?></option><?php endforeach; ?>
+                </select>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -485,6 +493,16 @@ include '../core/page_head.php';
             const weekly = parseFloat(document.getElementById('weeklyBudgetInput').value);
             data.append('cost', (weekly / 7).toFixed(2));
             fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson).then(res => { if(res.status === 'success') location.reload(); else alert(res.message); });
+        }
+
+        // A change applies from now on; earlier entries keep the days they were logged on.
+        function setTimezone(tz) {
+            let device = '';
+            try { device = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+            const data = new URLSearchParams({ action: 'set_timezone', mode: tz ? 'manual' : 'auto', tz: tz || device });
+            fetch('../core/user_api.php', { method: 'POST', body: data }).then(spenceJson)
+                .then(res => { if (res.status === 'success') location.reload(); else alert(res.message); })
+                .catch(err => alert(requestErrorMessage(err)));
         }
 
         function submitWeighIn(e) {

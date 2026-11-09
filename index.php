@@ -35,10 +35,11 @@ $inv_value    = number_format($inv['total_value'] ?? 0, 2);
 $inv_products = (int)($inv['products'] ?? 0);
 
 // ── Monthly spend projection (rolling 30-day avg × days in month) ─────────────
-$stmt = $db->query("
+$stmt = $db->prepare("
     SELECT SUM(amount * unit_cost) as total
     FROM consumption_log
-    WHERE consumed_at >= datetime('now', '-30 days')");
+    WHERE consumed_at >= ? AND consumed_at < ?");
+$stmt->execute(spenceLocalDayBounds(date('Y-m-d', strtotime('-29 days')), $today));
 $spend_30d     = (float)($stmt->fetchColumn() ?? 0);
 $daily_avg     = $spend_30d / 30;
 $days_in_month = (int)date('t');

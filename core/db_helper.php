@@ -4,23 +4,142 @@
  */
 require_once __DIR__ . '/runtime_config.php';
 
-// Global Timezone Protocol (GTP v1.0)
-date_default_timezone_set('Australia/Sydney');
+const SPENCE_DEFAULT_TIMEZONE = 'Australia/Sydney';
 
-/*
- * Timestamps are stored in UTC (CURRENT_TIMESTAMP). Sydney's offset is +10 or +11 depending on DST,
- * so each value is converted on its own date: never apply today's offset to history.
+// Fallback until get_db_connection() loads the tenant's timeline and switches to its current zone.
+date_default_timezone_set(SPENCE_DEFAULT_TIMEZONE);
+
+/**
+ * Timestamps are stored in UTC (CURRENT_TIMESTAMP) and read through the tenant's time zone
+ * history (`timezone_periods`): each timestamp uses the zone in force when it was written, with
+ * that date's own DST offset. Periods are only ever appended from "now", so changing zone never
+ * re-buckets history: an entry stays on the day it was logged.
+ *
+ * Local days stay a clean partition across a change: a row's day is never earlier than the last
+ * day of the period before it. Flying west after midnight (local clock jumps back to yesterday's
+ * evening) keeps those hours on the day already started rather than reopening yesterday.
  */
+final class SpenceTimeline {
+    /** @var list<array{from: ?int, to: ?int, tz: DateTimeZone, source: string, floor: ?string}> */
+    private array $periods = [];
+
+    /** @param list<array{effective_from: string, tz: string, source?: string}> $rows ascending */
+    public function __construct(array $rows) {
+        if (!$rows) $rows = [['effective_from' => '', 'tz' => SPENCE_DEFAULT_TIMEZONE, 'source' => 'auto']];
+        $utc = new DateTimeZone('UTC');
+        foreach (array_values($rows) as $i => $row) {
+            try {
+                $tz = new DateTimeZone($row['tz']);
+            } catch (Exception $e) {
+                $tz = new DateTimeZone(SPENCE_DEFAULT_TIMEZONE);
+            }
+            // The first period covers everything before it, however early.
+            $from = $i === 0 ? null : (new DateTimeImmutable($row['effective_from'], $utc))->getTimestamp();
+            if ($i > 0) $this->periods[$i - 1]['to'] = $from;
+            $floor = null;
+            if ($i > 0) {
+                $prev = $this->periods[$i - 1];
+                $lastDay = (new DateTimeImmutable('@' . ($from - 1)))->setTimezone($prev['tz'])->format('Y-m-d');
+                $floor = $prev['floor'] !== null && $prev['floor'] > $lastDay ? $prev['floor'] : $lastDay;
+            }
+            $this->periods[] = ['from' => $from, 'to' => null, 'tz' => $tz, 'source' => $row['source'] ?? 'auto', 'floor' => $floor];
+        }
+    }
+
+    public function currentZone(): DateTimeZone { return end($this->periods)['tz']; }
+    public function currentSource(): string { return end($this->periods)['source']; }
+
+    private function periodAt(int $ts): array {
+        for ($i = count($this->periods) - 1; $i > 0; $i--) {
+            if ($ts >= $this->periods[$i]['from']) return $this->periods[$i];
+        }
+        return $this->periods[0];
+    }
+
+    private static function parseUtc(?string $utc): ?int {
+        if ($utc === null || $utc === '') return null;
+        try {
+            return (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->getTimestamp();
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    /** Local wall time 'Y-m-d H:i:s' in the zone in force at the timestamp. */
+    public function localDateTime(?string $utc): ?string {
+        $ts = self::parseUtc($utc);
+        if ($ts === null) return null;
+        return (new DateTimeImmutable('@' . $ts))->setTimezone($this->periodAt($ts)['tz'])->format('Y-m-d H:i:s');
+    }
+
+    /** The local day a timestamp belongs to (see the class note on period changes). */
+    public function localDate(?string $utc): ?string {
+        $ts = self::parseUtc($utc);
+        if ($ts === null) return null;
+        $period = $this->periodAt($ts);
+        $day = (new DateTimeImmutable('@' . $ts))->setTimezone($period['tz'])->format('Y-m-d');
+        return $period['floor'] !== null && $period['floor'] > $day ? $period['floor'] : $day;
+    }
+
+    /** First instant whose local day is $day or later. */
+    private function dayStart(string $day): int {
+        foreach ($this->periods as $period) {
+            if ($period['floor'] !== null && $period['floor'] >= $day) {
+                $start = $period['from'];
+            } else {
+                $midnight = DateTimeImmutable::createFromFormat('!Y-m-d', $day, $period['tz']);
+                if (!$midnight) throw new InvalidArgumentException('Expected Y-m-d local days');
+                $start = $period['from'] === null ? $midnight->getTimestamp() : max($period['from'], $midnight->getTimestamp());
+            }
+            if ($period['to'] === null || $start < $period['to']) return $start;
+        }
+        throw new LogicException('Timeline has no open-ended period');
+    }
+
+    /** UTC bounds [start, end) covering local days $fromDay..$toDay. */
+    public function dayBounds(string $fromDay, ?string $toDay = null): array {
+        $toDay ??= $fromDay;
+        $next = DateTimeImmutable::createFromFormat('!Y-m-d', $toDay, new DateTimeZone('UTC'));
+        if (!$next || !DateTimeImmutable::createFromFormat('!Y-m-d', $fromDay)) throw new InvalidArgumentException('Expected Y-m-d local days');
+        return [
+            gmdate('Y-m-d H:i:s', $this->dayStart($fromDay)),
+            gmdate('Y-m-d H:i:s', $this->dayStart($next->modify('+1 day')->format('Y-m-d'))),
+        ];
+    }
+}
+
+/** The timeline of the tenant database most recently opened by get_db_connection(). */
+function spenceTimeline(?SpenceTimeline $set = null): SpenceTimeline {
+    static $timeline = null;
+    if ($set !== null) $timeline = $set;
+    return $timeline ??= new SpenceTimeline([]);
+}
+
+function loadSpenceTimeline(PDO $db): SpenceTimeline {
+    return new SpenceTimeline($db->query('SELECT effective_from, tz, source FROM timezone_periods ORDER BY effective_from, id')->fetchAll(PDO::FETCH_ASSOC));
+}
+
+/**
+ * Record a zone change from now on (never backdated, so history stays put). $source is 'manual'
+ * for a zone picked in Settings, 'auto' for browser detection or for picking Automatic there
+ * ($fromSettings). Detection is ignored while a manual choice stands and for generic UTC/Etc
+ * zones. Returns whether a new period was started.
+ */
+function spenceSetTimezone(PDO $db, string $tz, string $source, bool $fromSettings = false): bool {
+    if (!in_array($source, ['auto', 'manual'], true)) throw new InvalidArgumentException('Invalid time zone source.');
+    if (!in_array($tz, DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC), true)) throw new InvalidArgumentException('Unknown time zone.');
+    $timeline = loadSpenceTimeline($db);
+    if ($source === 'auto' && !$fromSettings && ($timeline->currentSource() === 'manual' || $tz === 'UTC' || str_starts_with($tz, 'Etc/'))) return false;
+    if ($timeline->currentZone()->getName() === $tz && $timeline->currentSource() === $source) return false;
+    $db->prepare('INSERT INTO timezone_periods (effective_from, tz, source) VALUES (?, ?, ?)')->execute([gmdate('Y-m-d H:i:s'), $tz, $source]);
+    spenceTimeline(loadSpenceTimeline($db));
+    date_default_timezone_set($tz);
+    return true;
+}
 
 /** Local 'Y-m-d H:i:s' for a stored UTC timestamp. */
 function spenceLocalDateTime(?string $utc): ?string {
-    if ($utc === null || $utc === '') return null;
-    try {
-        $time = new DateTimeImmutable($utc, new DateTimeZone('UTC'));
-    } catch (Exception $e) {
-        return null;
-    }
-    return $time->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d H:i:s');
+    return spenceTimeline()->localDateTime($utc);
 }
 
 /**
@@ -28,25 +147,14 @@ function spenceLocalDateTime(?string $utc): ?string {
  * against stored UTC timestamps (which also lets the column's index be used).
  */
 function spenceLocalDayBounds(string $fromDay, ?string $toDay = null): array {
-    $local = new DateTimeZone(date_default_timezone_get());
-    $utc = new DateTimeZone('UTC');
-    $start = DateTimeImmutable::createFromFormat('!Y-m-d', $fromDay, $local);
-    $end = DateTimeImmutable::createFromFormat('!Y-m-d', $toDay ?? $fromDay, $local);
-    if (!$start || !$end) throw new InvalidArgumentException('Expected Y-m-d local days');
-    return [
-        $start->setTimezone($utc)->format('Y-m-d H:i:s'),
-        $end->modify('+1 day')->setTimezone($utc)->format('Y-m-d H:i:s'),
-    ];
+    return spenceTimeline()->dayBounds($fromDay, $toDay);
 }
 
 /** SQL helpers for per-row conversion: spence_local_date(col), spence_local_datetime(col). */
 function registerSpenceSqlFunctions(PDO $db): void {
-    $flags = defined('PDO::SQLITE_DETERMINISTIC') ? PDO::SQLITE_DETERMINISTIC : 0;
-    $db->sqliteCreateFunction('spence_local_datetime', fn($utc) => spenceLocalDateTime($utc === null ? null : (string)$utc), 1, $flags);
-    $db->sqliteCreateFunction('spence_local_date', function ($utc) {
-        $local = spenceLocalDateTime($utc === null ? null : (string)$utc);
-        return $local === null ? null : substr($local, 0, 10);
-    }, 1, $flags);
+    // Not DETERMINISTIC: the timeline gains a period when the zone changes mid-request.
+    $db->sqliteCreateFunction('spence_local_datetime', fn($utc) => spenceTimeline()->localDateTime($utc === null ? null : (string)$utc), 1);
+    $db->sqliteCreateFunction('spence_local_date', fn($utc) => spenceTimeline()->localDate($utc === null ? null : (string)$utc), 1);
 }
 
 function applyDatabaseMigration(PDO $db, string $version, callable $migration): void {
@@ -245,6 +353,22 @@ function get_db_connection(?string $dbPath = null): PDO {
             }
         }
     });
+
+    // The zone history behind every local day; the seed period keeps all existing rows on Sydney days.
+    applyDatabaseMigration($db, '010_timezone_periods', function (PDO $db): void {
+        $db->exec("CREATE TABLE IF NOT EXISTS timezone_periods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            effective_from DATETIME NOT NULL,
+            tz TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'auto' CHECK(source IN ('auto', 'manual'))
+        )");
+        if (!$db->query('SELECT 1 FROM timezone_periods')->fetchColumn()) {
+            $db->prepare("INSERT INTO timezone_periods (effective_from, tz, source) VALUES ('0001-01-01 00:00:00', ?, 'auto')")->execute([SPENCE_DEFAULT_TIMEZONE]);
+        }
+    });
+
+    $timeline = spenceTimeline(loadSpenceTimeline($db));
+    date_default_timezone_set($timeline->currentZone()->getName());
 
     return $db;
 }

@@ -99,6 +99,15 @@ try {
         else $db->prepare('DELETE FROM energy_day_exclusions WHERE day = ?')->execute([$day]);
         echo json_encode(['status' => 'success']);
 
+    } elseif ($action === 'set_timezone') {
+        // mode: 'detected' (browser, on page load), or a Settings choice: 'auto' or 'manual'
+        $mode = $_POST['mode'] ?? 'detected';
+        if (!in_array($mode, ['detected', 'auto', 'manual'], true)) throw new Exception('Invalid mode.');
+        $tz = (string)($_POST['tz'] ?? '');
+        if ($mode === 'auto' && ($tz === '' || $tz === 'UTC' || str_starts_with($tz, 'Etc/'))) $tz = spenceTimeline()->currentZone()->getName();
+        $changed = spenceSetTimezone($db, $tz, $mode === 'manual' ? 'manual' : 'auto', $mode !== 'detected');
+        echo json_encode(['status' => 'success', 'changed' => $changed]);
+
     } elseif ($action === 'save_energy_preferences') {
         $enabled = (int)($_POST['enabled'] ?? 0) === 1 ? 1 : 0;
         $goalAdjustment = (float)($_POST['goal_adjustment_kj'] ?? 0);
