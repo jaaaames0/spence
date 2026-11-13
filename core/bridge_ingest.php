@@ -1,5 +1,9 @@
 <?php
-/** Legacy job bridge retained for PDF/background receipt workflows. */
+/** Legacy job bridge retained for PDF/background receipt workflows. CLI only. */
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 require_once __DIR__ . '/db_helper.php';
 require_once __DIR__ . '/receipt_ingest.php';
 

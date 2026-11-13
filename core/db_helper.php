@@ -180,6 +180,8 @@ function get_db_connection(?string $dbPath = null): PDO {
     $db->exec('PRAGMA busy_timeout = 5000;');
     $db->exec('PRAGMA journal_mode=WAL;');
     $db->exec('PRAGMA foreign_keys = ON;');
+    // Public sandbox: at most 64 MB (16384 pages of 4 KB); a full sandbox errors until its reset.
+    if (spenceDemoMode()) $db->exec('PRAGMA max_page_count = 16384;');
     registerSpenceSqlFunctions($db);
     $db->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
         version TEXT PRIMARY KEY,

@@ -103,6 +103,10 @@ try {
         // mode: 'detected' (browser, on page load), or a Settings choice: 'auto' or 'manual'
         $mode = $_POST['mode'] ?? 'detected';
         if (!in_array($mode, ['detected', 'auto', 'manual'], true)) throw new Exception('Invalid mode.');
+        if ($mode === 'detected' && spenceDemoMode()) {
+            echo json_encode(['status' => 'success', 'changed' => false]);
+            exit;
+        }
         $tz = (string)($_POST['tz'] ?? '');
         if ($mode === 'auto' && ($tz === '' || $tz === 'UTC' || str_starts_with($tz, 'Etc/'))) $tz = spenceTimeline()->currentZone()->getName();
         $changed = spenceSetTimezone($db, $tz, $mode === 'manual' ? 'manual' : 'auto', $mode !== 'detected');

@@ -9,6 +9,25 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 require_once __DIR__ . '/runtime_config.php';
 
+// Every page and API includes this file first, so this guards every write.
+if (spenceCrossSiteWriteBlocked($_SERVER)) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Cross-site request refused.');
+}
+
+// Public sandbox: everyone is the primary tenant of the demo database; no key exists.
+if (spenceDemoMode()) {
+    $tenantId = SPENCE_PRIMARY_TENANT;
+    $tenant = spenceTenant($tenantId);
+    $authenticated = true;
+    if (isset($_GET['logout'])) {
+        header('Location: /spence/');
+        exit;
+    }
+    return;
+}
+
 // The pool supplies only a non-secret file path. The value never enters the
 // FPM master environment; the value fallback is retained for local development.
 $ACCESS_KEY = spenceReadCredential(

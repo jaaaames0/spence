@@ -20,11 +20,12 @@ function reportForgeIntegrationFailure(string $reason): void {
 function getForgeExportPath(): array {
     $runtimePath = '/var/lib/forge/exports/spence-v1.db';
     $siblingPath = dirname(__DIR__, 2) . '/forge/database/forge.db';
-    $configuredPath = getenv('FORGE_DB_PATH');
+    $configuredPath = getenv('FORGE_DB_PATH', true);
 
     if ($configuredPath !== false && $configuredPath !== '') {
         return ['path' => $configuredPath, 'requires_contract' => true];
     }
+    if (spenceDemoMode()) return ['path' => '', 'requires_contract' => true];
     if (is_readable($runtimePath)) {
         return ['path' => $runtimePath, 'requires_contract' => true];
     }
@@ -71,7 +72,7 @@ function getForgeDbConnection(): ?PDO {
     }
 
     if ($resolved['requires_contract']) {
-        $maxAge = filter_var(getenv('FORGE_EXPORT_MAX_AGE_SECONDS') ?: FORGE_EXPORT_MAX_AGE_SECONDS, FILTER_VALIDATE_INT);
+        $maxAge = filter_var(getenv('FORGE_EXPORT_MAX_AGE_SECONDS', true) ?: FORGE_EXPORT_MAX_AGE_SECONDS, FILTER_VALIDATE_INT);
         if ($maxAge === false || $maxAge < 60) $maxAge = FORGE_EXPORT_MAX_AGE_SECONDS;
         $modifiedAt = filemtime($dbPath);
         if ($modifiedAt === false || time() - $modifiedAt > $maxAge) {
