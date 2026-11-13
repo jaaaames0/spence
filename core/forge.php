@@ -25,6 +25,7 @@ function getForgeExportPath(): array {
     if ($configuredPath !== false && $configuredPath !== '') {
         return ['path' => $configuredPath, 'requires_contract' => true];
     }
+    if (spenceDemoMode()) return ['path' => '', 'requires_contract' => true];
     if (is_readable($runtimePath)) {
         return ['path' => $runtimePath, 'requires_contract' => true];
     }

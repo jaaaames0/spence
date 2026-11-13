@@ -54,8 +54,28 @@ try {
     assertSameValue(true, $cookie['httponly'], 'cookie HttpOnly flag');
     assertSameValue('Lax', $cookie['samesite'], 'cookie SameSite policy');
 
+    // Demo mode: no Ingredients even when the list exists, no NanoGPT key even when one is configured.
+    $keyPath = $credentialPath . '.nanogpt';
+    file_put_contents($keyPath, "dummy-nanogpt\n");
+    putenv('NANOGPT_CREDENTIAL_FILE=' . $keyPath);
+    putenv('SPENCE_INGREDIENTS_PATH=' . $credentialPath);
+    assertSameValue(false, spenceDemoMode(), 'demo mode is off by default');
+    assertSameValue('dummy-nanogpt', spenceNanoGptKey(), 'primary reads its NanoGPT key outside demo');
+    putenv('SPENCE_DEMO=1');
+    assertSameValue(true, spenceDemoMode(), 'SPENCE_DEMO=1 enables demo mode');
+    assertSameValue('', spenceNanoGptKey(), 'demo never reads a NanoGPT key');
+    assertSameValue(false, spenceIngredientsEnabled(), 'demo never enables Ingredients');
+    putenv('SPENCE_DEMO=yes');
+    assertSameValue(false, spenceDemoMode(), 'only the exact value 1 enables demo mode');
+    putenv('SPENCE_DEMO');
+    putenv('NANOGPT_CREDENTIAL_FILE');
+    putenv('SPENCE_INGREDIENTS_PATH');
+    @unlink($keyPath);
+
     echo "runtime config tests passed\n";
 } finally {
+    putenv('SPENCE_DEMO');
+    putenv('NANOGPT_CREDENTIAL_FILE');
     putenv('SPENCE_TEST_CREDENTIAL_FILE');
     putenv('SPENCE_TEST_CREDENTIAL_VALUE');
     putenv('SPENCE_TEST_PATH');

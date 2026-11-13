@@ -9,6 +9,18 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 require_once __DIR__ . '/runtime_config.php';
 
+// Public sandbox: everyone is the primary tenant of the demo database; no key exists.
+if (spenceDemoMode()) {
+    $tenantId = SPENCE_PRIMARY_TENANT;
+    $tenant = spenceTenant($tenantId);
+    $authenticated = true;
+    if (isset($_GET['logout'])) {
+        header('Location: /spence/');
+        exit;
+    }
+    return;
+}
+
 // The pool supplies only a non-secret file path. The value never enters the
 // FPM master environment; the value fallback is retained for local development.
 $ACCESS_KEY = spenceReadCredential(

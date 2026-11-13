@@ -5,6 +5,10 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db_helper.php';
 
+if (spenceDemoMode()) {
+    http_response_code(403);
+    exit('Uploads are off here.');
+}
 $uploadDir = spenceUploadDir();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['receipt'])) {

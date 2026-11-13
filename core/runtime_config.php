@@ -19,6 +19,14 @@ function spenceConfiguredPath(string $environmentName, string $defaultPath): str
     return spenceAbsolutePath($path, $environmentName);
 }
 
+/**
+ * Public sandbox mode (SPENCE_DEMO=1, demo.jaaaames.com): no access key, no scanning, no
+ * Ingredients handoff, and the time zone is not taken from each visitor's browser.
+ */
+function spenceDemoMode(): bool {
+    return getenv('SPENCE_DEMO') === '1';
+}
+
 // The shopping list belongs to a separate app outside the Spence runtime, so it is
 // located by absolute path. Unset means the handoff is off.
 function spenceIngredientsListPath(): string {
@@ -29,6 +37,7 @@ function spenceIngredientsListPath(): string {
 }
 
 function spenceIngredientsEnabled(): bool {
+    if (spenceDemoMode()) return false;
     $path = spenceIngredientsListPath();
     return spenceTenant()['primary'] && $path !== '' && is_file($path);
 }
@@ -120,6 +129,7 @@ function spenceUploadDir(): string {
  * spend and limits) and never fall back to the primary's key; '' disables scanning.
  */
 function spenceNanoGptKey(): string {
+    if (spenceDemoMode()) return '';
     $tenant = spenceTenant();
     if ($tenant['primary']) {
         return spenceReadCredential('NANOGPT_CREDENTIAL_FILE', '/etc/spence/nanogpt-key', 'NANOGPT_API_KEY');
@@ -130,6 +140,7 @@ function spenceNanoGptKey(): string {
 
 /** Why scanning is unavailable, worded for whoever is signed in. */
 function spenceNanoGptMissingMessage(): string {
+    if (spenceDemoMode()) return 'Photo and receipt scanning is off here.';
     return spenceTenant()['primary']
         ? 'NanoGPT API key not configured.'
         : 'Photo and receipt scanning is not set up for this account yet.';

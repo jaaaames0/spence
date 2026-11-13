@@ -8,6 +8,7 @@
 - **Spend & wastage:** Every purchase is logged per item. A new *wasted* action records thrown-out value, and hand-lowered quantities count as waste. Waste % appears on the weekly cost card and the dashboard projection.
 - **Dashboard:** Header quick actions (scan receipt, photo Quick Eat), regrouped and clickable cards, source breakdowns, favourite meals and ingredients, and a macro check.
 - **Food leaderboard:** Ranks every food eaten by several metrics, in meal or ingredient mode. Variants can be grouped by type. Cook ranks same-type substitutes first.
+- **Public sandbox mode:** `SPENCE_DEMO=1` opens the app without a key as the primary tenant, turns off scanning, uploads and the Ingredients handoff, never falls back to another Forge export, and ignores browser-detected time zone changes. `ops/demo-export.php` exports reviewable catalogue and recipe candidates from a database (read-only), and `ops/demo-seed.php` builds a fresh sandbox database from them with invented stock, shopping, meals, weight and goal relative to today.
 - **Guest tenants:** Guests get their own database, uploads and NanoGPT key, seeded from the product catalogue (`ops/spence-create-tenant.php`).
 - **Type-to-search product pickers** replace dropdowns and datalists. A post-scan spice review lets you move misclassified spice items to the rack.
 - **Log:** The recipe breakdown shows per-ingredient cost and adds up to the logged entry. Per-item history converts to weight when a product moves to kg/L.
