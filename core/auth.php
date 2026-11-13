@@ -9,6 +9,13 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 require_once __DIR__ . '/runtime_config.php';
 
+// Every page and API includes this file first, so this guards every write.
+if (spenceCrossSiteWriteBlocked($_SERVER)) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Cross-site request refused.');
+}
+
 // Public sandbox: everyone is the primary tenant of the demo database; no key exists.
 if (spenceDemoMode()) {
     $tenantId = SPENCE_PRIMARY_TENANT;

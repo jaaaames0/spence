@@ -17,7 +17,7 @@ class SpenceNanoGptException extends RuntimeException {
 }
 
 function spenceEnvironmentFlag(string $name): bool {
-    $value = getenv($name);
+    $value = getenv($name, true);
     if ($value === false) return false;
     return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
 }

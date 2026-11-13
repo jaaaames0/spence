@@ -3,7 +3,9 @@
  * Runtime configuration helpers shared by the dedicated PHP-FPM pool.
  *
  * Environment variables carry non-secret paths only. Credential values remain
- * in files readable by the Spence identity.
+ * in files readable by the Spence identity. They are read with getenv($name, true):
+ * the process environment (the pool's env[] lines) only. A bare getenv() under
+ * PHP-FPM also returns FastCGI request parameters.
  */
 
 function spenceAbsolutePath(string $path, string $label): string {
@@ -14,23 +16,50 @@ function spenceAbsolutePath(string $path, string $label): string {
 }
 
 function spenceConfiguredPath(string $environmentName, string $defaultPath): string {
-    $configured = getenv($environmentName);
+    $configured = getenv($environmentName, true);
     $path = ($configured === false || $configured === '') ? $defaultPath : $configured;
     return spenceAbsolutePath($path, $environmentName);
 }
 
+/** Sandbox databases live here and nowhere else (demo.jaaaames.com, ops/demo-seed.php). */
+const SPENCE_DEMO_STATE_PREFIX = '/var/lib/spence-demo/';
+
 /**
- * Public sandbox mode (SPENCE_DEMO=1, demo.jaaaames.com): no access key, no scanning, no
- * Ingredients handoff, and the time zone is not taken from each visitor's browser.
+ * Public sandbox mode (demo.jaaaames.com): no access key, no scanning, no Ingredients handoff,
+ * and the time zone is not taken from each visitor's browser. It needs both SPENCE_DEMO=1 and a
+ * database below SPENCE_DEMO_STATE_PREFIX, so a stray flag can never unlock a real database:
+ * anywhere else the normal lock applies.
  */
 function spenceDemoMode(): bool {
-    return getenv('SPENCE_DEMO') === '1';
+    if (getenv('SPENCE_DEMO', true) !== '1') return false;
+    $db = getenv('SPENCE_DB_PATH', true);
+    return is_string($db) && str_starts_with($db, SPENCE_DEMO_STATE_PREFIX)
+        && !str_contains($db, '/../') && !str_contains($db, "\0");
+}
+
+/**
+ * True for a state-changing request a browser sent from another origin, sibling subdomains
+ * included: demo.jaaaames.com is "same-site" with jaaaames.com, so SameSite cookies do not stop
+ * it. Browsers send Sec-Fetch-Site on every request and Origin on every POST. A request with
+ * neither is not a browser carrying someone's cookies.
+ */
+function spenceCrossSiteWriteBlocked(array $server): bool {
+    $method = strtoupper((string)($server['REQUEST_METHOD'] ?? 'GET'));
+    if (in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) return false;
+    $site = $server['HTTP_SEC_FETCH_SITE'] ?? '';
+    if (is_string($site) && $site !== '') return !in_array(strtolower($site), ['same-origin', 'none'], true);
+    $origin = $server['HTTP_ORIGIN'] ?? '';
+    if (is_string($origin) && $origin !== '') {
+        $host = strtolower((string)($server['HTTP_HOST'] ?? ''));
+        return $host === '' || strtolower($origin) !== 'https://' . $host;
+    }
+    return false;
 }
 
 // The shopping list belongs to a separate app outside the Spence runtime, so it is
 // located by absolute path. Unset means the handoff is off.
 function spenceIngredientsListPath(): string {
-    $configured = getenv('SPENCE_INGREDIENTS_PATH');
+    $configured = getenv('SPENCE_INGREDIENTS_PATH', true);
     return ($configured === false || $configured === '')
         ? ''
         : spenceAbsolutePath($configured, 'SPENCE_INGREDIENTS_PATH');
@@ -53,7 +82,7 @@ function spenceReadCredential(
         return $contents === false ? '' : trim($contents);
     }
 
-    $fallback = getenv($valueEnvironmentName);
+    $fallback = getenv($valueEnvironmentName, true);
     return $fallback === false ? '' : trim($fallback);
 }
 
@@ -104,8 +133,8 @@ function spenceTenantDescriptor(string $id): array {
         return [
             'id' => $id,
             'primary' => true,
-            'db_path' => getenv('SPENCE_DB_PATH') ?: __DIR__ . '/../database/spence.db',
-            'upload_dir' => rtrim(getenv('SPENCE_UPLOAD_DIR') ?: __DIR__ . '/../uploads', '/') . '/',
+            'db_path' => getenv('SPENCE_DB_PATH', true) ?: __DIR__ . '/../database/spence.db',
+            'upload_dir' => rtrim(getenv('SPENCE_UPLOAD_DIR', true) ?: __DIR__ . '/../uploads', '/') . '/',
         ];
     }
     if (!spenceValidTenantId($id)) throw new InvalidArgumentException('Invalid tenant id');
