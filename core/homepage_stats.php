@@ -13,13 +13,15 @@
  *     every Quick Eat entry), is a raw catalogue product (recipe names are free text) outside
  *     Drinks and Other, is shown by its type (productBaseName strips brand and shop), and was
  *     eaten often enough (FOOD_MIN_SITTINGS on FOOD_MIN_DAYS distinct days in the window);
- *   - totals (energy, protein, weight) count every source but carry no names.
+ *   - totals (energy, protein, weight) count every source but carry no names;
+ *   - weekly series are complete Monday–Sunday weeks; intake is per logged day, and a week with
+ *     too few logged days is interpolated, so a trip without logging leaves no dip or gap.
  *
  * Reads a private snapshot (VACUUM INTO), never the live database.
  */
 require_once __DIR__ . '/db_helper.php';
 
-const SPENCE_HOMEPAGE_SCHEMA = 1;
+const SPENCE_HOMEPAGE_SCHEMA = 2;
 const SPENCE_HOMEPAGE_ZONE = 'Australia/Sydney';
 const SPENCE_HOMEPAGE_WINDOW_DAYS = 28;
 /** Windows end on the second day of each two-day bucket counted from this Monday. */
@@ -28,6 +30,11 @@ const SPENCE_HOMEPAGE_FOOD_MIN_SITTINGS = 4;
 const SPENCE_HOMEPAGE_FOOD_MIN_DAYS = 3;
 const SPENCE_HOMEPAGE_EXCLUDED_CATEGORIES = ['Drinks', 'Other'];
 const SPENCE_HOMEPAGE_STAPLE_MIN_WEEKS = 4;
+/** Weekly series: complete Monday–Sunday weeks ending on the last Sunday on or before as_of. */
+const SPENCE_HOMEPAGE_SERIES_WEEKS = 52;
+/** Intake is averaged per logged day; a week with fewer logged days is interpolated instead. */
+const SPENCE_HOMEPAGE_MIN_LOGGED_DAYS = 3;
+const SPENCE_HOMEPAGE_MAX_GAP_WEEKS = 8;
 /** Names the validator will accept; anything else is skipped here rather than failing there. */
 const SPENCE_HOMEPAGE_NAME_PATTERN = "/^\\p{L}[\\p{L} '&-]{0,39}$/u";
 
@@ -68,10 +75,10 @@ function spenceHomepageStats(PDO $db, string $asOf): array {
 
     // Totals over every source (no names): energy, protein, weight eaten this year.
     $logKg = "(CASE WHEN cl.unit = 'ea' THEN cl.amount * COALESCE(p.weight_per_ea, cl.quick_eat_weight_per_ea, 0) ELSE cl.amount END)";
-    $totals = function (string $from) use ($db, $logKg, $end): array {
+    $totals = function (string $from, ?string $to = null) use ($db, $logKg, $end): array {
         $stmt = $db->prepare("SELECT COALESCE(SUM(MAX(cl.kj, 0)), 0) AS kj, COALESCE(SUM(MAX(cl.protein, 0)), 0) AS protein, COALESCE(SUM(MAX($logKg, 0)), 0) AS kg
             FROM consumption_log cl LEFT JOIN products p ON p.id = cl.product_id WHERE cl.consumed_at >= ? AND cl.consumed_at < ?");
-        $stmt->execute([$from, $end]);
+        $stmt->execute([$from, $to ?? $end]);
         return array_map('floatval', $stmt->fetch(PDO::FETCH_ASSOC));
     };
     $year = $totals($yearStart);
@@ -84,22 +91,10 @@ function spenceHomepageStats(PDO $db, string $asOf): array {
     // kJ share as on the leaderboard), merged products as their survivor.
     $sittings = spenceHomepageNameableSittings($db, $end);
 
-    $foods = [];
-    foreach ($sittings as $s) {
-        if ($s['at'] < $start) continue;
-        $f = &$foods[$s['key']];
-        $f ??= ['name' => $s['name'], 'kj' => 0.0, 'entries' => [], 'days' => []];
-        $f['kj'] += $s['kj'];
-        $f['entries'][$s['id']] = true;
-        $f['days'][$s['day']] = true;
-        unset($f);
-    }
-    $top = [];
-    foreach ($foods as $f) {
-        if (count($f['entries']) < SPENCE_HOMEPAGE_FOOD_MIN_SITTINGS || count($f['days']) < SPENCE_HOMEPAGE_FOOD_MIN_DAYS || $f['kj'] <= 0) continue;
-        $top[] = ['name' => $f['name'], 'pct' => $window['kj'] > 0 ? round($f['kj'] * 100 / $window['kj'], 1) : 0.0];
-    }
-    usort($top, fn($a, $b) => $b['pct'] <=> $a['pct'] ?: strcasecmp($a['name'], $b['name']));
+    $top = spenceHomepageRank($sittings, $start, $end, $window['kj']);
+    $prevFrom = spenceHomepageShift($windowFrom, -SPENCE_HOMEPAGE_WINDOW_DAYS);
+    [$prevStart] = spenceHomepageBounds($prevFrom, $asOf);
+    $prev = spenceHomepageRank($sittings, $prevStart, $start, $totals($prevStart, $start)['kj']);
 
     return [
         'schema' => SPENCE_HOMEPAGE_SCHEMA,
@@ -113,7 +108,109 @@ function spenceHomepageStats(PDO $db, string $asOf): array {
             'groceries_28d' => (int)round($groceries),
         ],
         'top_energy' => array_slice($top, 0, 8),
+        'top_energy_prev' => array_slice($prev, 0, 12),
         'staples' => spenceHomepageStaples($sittings, $asOf),
+        'series' => spenceHomepageSeries($db, $asOf, $end),
+    ];
+}
+
+/** Foods eaten often enough in [$start, $end), by share of all energy eaten then. */
+function spenceHomepageRank(array $sittings, string $start, string $end, float $allKj): array {
+    $foods = [];
+    foreach ($sittings as $s) {
+        if ($s['at'] < $start || $s['at'] >= $end) continue;
+        $f = &$foods[$s['key']];
+        $f ??= ['name' => $s['name'], 'kj' => 0.0, 'entries' => [], 'days' => []];
+        $f['kj'] += $s['kj'];
+        $f['entries'][$s['id']] = true;
+        $f['days'][$s['day']] = true;
+        unset($f);
+    }
+    $top = [];
+    foreach ($foods as $f) {
+        if (count($f['entries']) < SPENCE_HOMEPAGE_FOOD_MIN_SITTINGS || count($f['days']) < SPENCE_HOMEPAGE_FOOD_MIN_DAYS || $f['kj'] <= 0) continue;
+        $top[] = ['name' => $f['name'], 'pct' => $allKj > 0 ? round($f['kj'] * 100 / $allKj, 1) : 0.0];
+    }
+    usort($top, fn($a, $b) => $b['pct'] <=> $a['pct'] ?: strcasecmp($a['name'], $b['name']));
+    return $top;
+}
+
+/** [first Monday, last Sunday] of the weekly series ending at the last complete week on or before $asOf. */
+function spenceHomepageWeeks(string $asOf): array {
+    $dow = (int)(new DateTimeImmutable($asOf, new DateTimeZone('UTC')))->format('N');
+    $lastSunday = $dow === 7 ? $asOf : spenceHomepageShift($asOf, -$dow);
+    return [spenceHomepageShift($lastSunday, -(7 * SPENCE_HOMEPAGE_SERIES_WEEKS - 1)), $lastSunday];
+}
+
+function spenceHomepageWeekIndex(string $from, string $day): int {
+    $utc = new DateTimeZone('UTC');
+    return (int)floor((int)(new DateTimeImmutable($from, $utc))->diff(new DateTimeImmutable($day, $utc))->format('%r%a') / 7);
+}
+
+/** Weekly values from known weeks (index => value); empty weeks interpolated across short gaps, else null. */
+function spenceHomepageFill(array $known, int $count): array {
+    ksort($known);
+    $keys = array_keys($known);
+    $out = [];
+    for ($i = 0; $i < $count; $i++) {
+        if (isset($known[$i])) { $out[] = (int)round($known[$i]); continue; }
+        $lo = $hi = null;
+        foreach ($keys as $k) {
+            if ($k < $i) $lo = $k;
+            elseif ($k > $i) { $hi = $k; break; }
+        }
+        $out[] = $lo !== null && $hi !== null && $hi - $lo <= SPENCE_HOMEPAGE_MAX_GAP_WEEKS
+            ? (int)round($known[$lo] + ($known[$hi] - $known[$lo]) * ($i - $lo) / ($hi - $lo)) : null;
+    }
+    return $out;
+}
+
+/** Weekly intake per logged day (kJ, protein g), every source; weekly groceries ($). */
+function spenceHomepageSeries(PDO $db, string $asOf, string $end): array {
+    [$weekFrom, $lastSunday] = spenceHomepageWeeks($asOf);
+    $weeks = SPENCE_HOMEPAGE_SERIES_WEEKS;
+    // Logs before the window or after the last complete week (up to as_of) only anchor.
+    [$anchorStart] = spenceHomepageBounds(spenceHomepageShift($weekFrom, -7 * SPENCE_HOMEPAGE_MAX_GAP_WEEKS), $asOf);
+    $stmt = $db->prepare('SELECT consumed_at, MAX(kj, 0), MAX(protein, 0) FROM consumption_log WHERE consumed_at >= ? AND consumed_at < ?');
+    $stmt->execute([$anchorStart, $end]);
+    $acc = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$at, $kj, $protein]) {
+        if ($at === null) continue;
+        $day = spenceHomepageDay($at);
+        $w = &$acc[spenceHomepageWeekIndex($weekFrom, $day)];
+        $w ??= ['kj' => 0.0, 'protein' => 0.0, 'days' => []];
+        $w['kj'] += (float)$kj;
+        $w['protein'] += (float)$protein;
+        $w['days'][$day] = true;
+        unset($w);
+    }
+    $kj = $protein = [];
+    foreach ($acc as $i => $w) {
+        if (count($w['days']) < SPENCE_HOMEPAGE_MIN_LOGGED_DAYS) continue;
+        $kj[$i] = $w['kj'] / count($w['days']);
+        $protein[$i] = $w['protein'] / count($w['days']);
+    }
+
+    // Groceries: null before the first purchase ever recorded, then the week's spend.
+    [$start, $weekEnd] = spenceHomepageBounds($weekFrom, $lastSunday);
+    $first = $db->query('SELECT MIN(purchased_at) FROM purchase_log WHERE price > 0')->fetchColumn();
+    $groceries = array_fill(0, $weeks, null);
+    if ($first) {
+        $firstWeek = spenceHomepageWeekIndex($weekFrom, spenceHomepageDay($first));
+        for ($i = max(0, $firstWeek); $i < $weeks; $i++) $groceries[$i] = 0.0;
+        $stmt = $db->prepare('SELECT purchased_at, price FROM purchase_log WHERE price > 0 AND purchased_at >= ? AND purchased_at < ?');
+        $stmt->execute([$start, $weekEnd]);
+        foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$at, $price]) {
+            $i = spenceHomepageWeekIndex($weekFrom, spenceHomepageDay($at));
+            if ($i >= 0 && $i < $weeks) $groceries[$i] += (float)$price;
+        }
+    }
+
+    return [
+        'week_from' => $weekFrom,
+        'kj_day' => spenceHomepageFill($kj, $weeks),
+        'protein_day' => spenceHomepageFill($protein, $weeks),
+        'groceries' => array_map(fn($g) => $g === null ? null : (int)round($g), $groceries),
     ];
 }
 
@@ -174,5 +271,5 @@ function spenceHomepageStaples(array $sittings, string $asOf): array {
         if ($n >= SPENCE_HOMEPAGE_STAPLE_MIN_WEEKS) $staples[] = ['name' => $names[$key], 'weeks' => $n];
     }
     usort($staples, fn($a, $b) => $b['weeks'] <=> $a['weeks'] ?: strcasecmp($a['name'], $b['name']));
-    return array_slice($staples, 0, 5);
+    return array_slice($staples, 0, 10);
 }
